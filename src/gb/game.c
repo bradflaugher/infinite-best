@@ -236,6 +236,7 @@ static void generate(uint8_t row)
     uint16_t f0 = sys_time;
     gfill(1, 2, row, 16, 1, TILE_BLANK, PAL_UI);   /* sets the CGB attributes too */
     sfx_play(SFX_GEN);
+    gen_cost = 0;       /* before the ISR reads it, or it shows the last sector's work */
     busy_start(2, row);
     gen_level(&level, run.seed, run.sector, 0);
     busy_stop();
