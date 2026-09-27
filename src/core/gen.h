@@ -12,12 +12,14 @@
 #define FREEFORM_SECTOR 22
 
 #define GEN_MAX_ATTEMPTS 48
+#define GEN_TEACH_ATTEMPTS 96   /* teaching sectors search longer */
 
 typedef struct {
     uint8_t par_min;
     uint8_t par_max;
     uint8_t mechs;      /* mechanics to place */
     uint8_t featured;   /* mechanic being introduced (0xFF none) */
+    uint8_t focus;      /* mechanic that must change par (0xFF none) */
 } GenParams;
 
 extern const uint8_t mech_unlock[NUM_MECH];

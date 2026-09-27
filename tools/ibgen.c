@@ -74,7 +74,7 @@ int main(int argc, char **argv)
                 spar += L.par;
                 State st; state_start(&L, &st); solve(&L, &st); visits += solve_visited;
                 (void)p;
-                if (L.attempts > GEN_MAX_ATTEMPTS) outwin++;
+                if (L.attempts > GEN_TEACH_ATTEMPTS) outwin++;
             }
             if (sec <= 30 || sec % 25 == 0)
                 printf("sector %3d  avg par %5.2f  avg attempts %5.1f  max %ld\n",

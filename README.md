@@ -30,7 +30,8 @@ under a second, and the game saves after every clear. It aims to be thinky witho
 
 - **Wordless teaching.** Each new mechanic arrives on a sector designed around it, with a
   one-line label. The generator checks that the new idea actually matters: it strips the
-  mechanic out, re-solves, and rejects the level if the par doesn't change. *(After The Witness.)*
+  mechanic out, re-solves, and rejects the level if the par doesn't change. The sectors that
+  follow keep asking the newest idea to matter, so it doesn't fade into decoration. *(After The Witness.)*
 - **Rewind is free; time is not.** Hold **B** to rewind as far as you like. The screen ripples
   and the music detunes. But your move counter and energy only go forward, so rewinding helps
   you understand the puzzle but can't earn you par. *(After Braid.)*
@@ -71,7 +72,7 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 
 | Mode | What it is |
 | --- | --- |
-| **RUN** | Roguelike. You start with 24 ⚡ and each move costs 1. A clear refunds its par, and a BEST adds +2 plus your streak. Reach zero and the run ends. Your furthest sector is the record. |
+| **RUN** | Roguelike. You start with 30 ⚡ and each move costs 1. A clear refunds its par, and a BEST adds +2 plus your streak. Reach zero and the run ends. Your furthest sector is the record. |
 | **ZEN** | Endless and calm. No energy, free hints, skip any sector. Your sector is saved. |
 | **SEED** | Start a RUN from a seed you type in (the pause and game-over screens show the current one). |
 | **CODEX** | The rules, plus a field guide that fills in as you discover mechanics. |
