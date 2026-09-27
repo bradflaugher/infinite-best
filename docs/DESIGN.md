@@ -103,7 +103,9 @@ DMG, so the budget works out at about 200 frames. The budget is checked between 
 can overshoot it: the worst seen over 100,000 sectors was 259 frames (4.3 s), and fewer than 1 in
 1,000 take over 3.8 s. Typical sectors take 0.2-1.5 s
 on an original Game Boy and about half that in Game Boy Color double-speed mode. The time runs
-while the clear banner is up (a "COMPILING" line with scrolling hex), and a long compile
+while the clear banner is up, under a "COMPILING" progress bar. The bar is drawn from the VBlank
+interrupt, so it keeps filling (and a highlight keeps running along it) even while the CPU is
+deep inside one solve. A long compile
 shortens the banner's reading pause by the same amount.
 
 ## Juice
