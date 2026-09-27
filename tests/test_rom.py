@@ -134,6 +134,7 @@ class Game:
 
 class RomTest(unittest.TestCase):
     CGB = False
+    SECTORS = 20      # reaches every mechanic (portals unlock at 18)
 
     @classmethod
     def setUpClass(cls):
@@ -162,7 +163,7 @@ class RomTest(unittest.TestCase):
         seed = 0x1D0B
         g.start_run(seed)
         g.shot('sector1')
-        for sector in range(1, 7):
+        for sector in range(1, self.SECTORS + 1):
             self.assertEqual(g.u16('run', RUN_SECTOR), sector)
             par, start, cells = ibgen('dump', seed, sector)
             self.assertEqual(g.level_cells().hex(), cells, f'sector {sector} grid differs from host')
@@ -172,6 +173,8 @@ class RomTest(unittest.TestCase):
             _, p = g.solve_current(seed)
             if sector == 3:
                 g.shot('win')
+            if sector in (5, 14, 18):
+                g.shot(f'mech{sector}')
             g.continue_after_win()
             # optimal play keeps the BEST streak alive and never loses energy
             self.assertEqual(g.u8('run', RUN_STREAK), sector)
@@ -259,6 +262,7 @@ class RomTest(unittest.TestCase):
 
 class RomTestCGB(RomTest):
     CGB = True
+    SECTORS = 12
 
 
 if __name__ == '__main__':

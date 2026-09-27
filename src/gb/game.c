@@ -48,13 +48,13 @@ static uint16_t seed_acc;
 static const char *const mech_name[NUM_MECH] = {
     "STOP PAD", "DATA CHIP", "NULL PIT", "ROUTER", "TOGGLE GATES", "PORTAL"
 };
-static const char *const mech_desc[NUM_MECH] = {
-    "GRIPS YOU MID-SLIDE",
-    "TAKE ALL: EXIT OPENS",
-    "FALL IN = SEGFAULT",
+static const char *const mech_desc[NUM_MECH] = {   /* <= 16 chars */
+    "HALTS YOUR SLIDE",
+    "TAKE ALL TO OPEN",
+    "TOUCH = SEGFAULT",
     "BENDS YOUR SLIDE",
-    "SWITCH FLIPS GATES",
-    "WARP. KEEP MOMENTUM"
+    "SWITCH FLIPS ALL",
+    "WARP, KEEP GOING"
 };
 static const uint8_t mech_unlock_at[NUM_MECH] = {
     UNLOCK_STOP, UNLOCK_CHIP, UNLOCK_PIT, UNLOCK_ARROW, UNLOCK_GATE, UNLOCK_PORTAL
@@ -247,7 +247,7 @@ static void mech_intro(void)
     txt(1, 2, 1, "NEW PROTOCOL", PAL_AMBER);
     put_mt(1, 2, 2, mech_mt[m]);
     txt(1, 5, 2, mech_name[m], PAL_UI);
-    txt(1, 1, 4, mech_desc[m], PAL_UI);
+    txt(1, 2, 4, mech_desc[m], PAL_UI);
     sfx_play(SFX_NEWMECH);
     ps = PS_INTRO;
     while (t < 200) {
@@ -450,6 +450,7 @@ static void win(void)
     }
 
     /* banner in the window over the bottom half */
+    for (t = 0; t < 4; t++) hide_sprite(SP_PLAYER + t);
     draw_box(1, 0, 0, 20, 8, PAL_UI);
     txt(1, 2, 1, "SECTOR", PAL_UI);
     txt_num(1, 9, 1, cleared_sector, 4, PAL_UI);
@@ -566,10 +567,11 @@ check_over:
 
     s = slide_speed;
     if (slide_speed < 8) slide_speed++;
-    if (px < tx) { px = (uint8_t)(px + s); if (px > tx) px = tx; }
-    else if (px > tx) { px = (uint8_t)(px - s); if (px < tx) px = tx; }
-    if (py < ty) { py = (uint8_t)(py + s); if (py > ty) py = ty; }
-    else if (py > ty) { py = (uint8_t)(py - s); if (py < ty) py = ty; }
+    /* step toward the target without unsigned under/overflow */
+    if (px < tx) px = (uint8_t)(tx - px <= s ? tx : px + s);
+    else if (px > tx) px = (uint8_t)(px - tx <= s ? tx : px - s);
+    if (py < ty) py = (uint8_t)(ty - py <= s ? ty : py + s);
+    else if (py > ty) py = (uint8_t)(py - ty <= s ? ty : py - s);
 
     {
         uint8_t i;
@@ -596,20 +598,22 @@ static uint8_t pause_menu(void)
     uint8_t sel = 0, i;
 
     ps = PS_PAUSE;
+    for (i = 0; i < 8; i++) hide_sprite(SP_PLAYER + i);   /* player, trail, hint */
     music_set_muffle(1);
     sfx_play(SFX_MENU);
-    draw_box(1, 0, 0, 20, 7, PAL_UI);
-    txt(1, 2, 0, "PAUSED", PAL_AMBER);
+    draw_box(1, 0, 0, 20, 8, PAL_UI);
+    txt(1, 2, 0, " PAUSED ", PAL_AMBER);
     for (i = 0; i < 4; i++) txt(1, 4, (uint8_t)(1 + i), items[i], PAL_UI);
-    txt(1, 2, 5, "SEED", PAL_UI);
-    txt_hex(1, 7, 5, run.seed, PAL_CHIP);
-    txt(1, 12, 5, BUILD_DATE, PAL_UI);
-    move_win(7, 88);
+    txt(1, 2, 6, "SEED", PAL_UI);
+    txt_hex(1, 7, 6, run.seed, PAL_CHIP);
+    txt(1, 12, 6, "S", PAL_UI);
+    txt_num(1, 13, 6, run.sector, 4, PAL_UI);
+    move_win(7, 80);
     for (;;) {
         tick();
         set_sprite_tile(SP_CURSOR, SPR_CURSOR);
         set_sprite_prop(SP_CURSOR, SPAL_CURSOR);
-        move_sprite(SP_CURSOR, (uint8_t)(8 + 16 + ((frame >> 3) & 1)), (uint8_t)(16 + 88 + 8 + sel * 8));
+        move_sprite(SP_CURSOR, (uint8_t)(8 + 16 + ((frame >> 3) & 1)), (uint8_t)(16 + 80 + 8 + sel * 8));
         if (pressed & J_UP) { sel = (uint8_t)((sel + 3) & 3); sfx_play(SFX_MENU); }
         if (pressed & J_DOWN) { sel = (uint8_t)((sel + 1) & 3); sfx_play(SFX_MENU); }
         if (pressed & (J_B | J_START)) { sel = 0; break; }
@@ -759,20 +763,20 @@ static void codex(void)
             txt(0, 1, 17, "RIGHT: TILES", PAL_UI);
         } else {
             txt(0, 1, 0, "CODEX", PAL_AMBER);
-            put_mt(0, 1, 2, MT_WALL);   txt(0, 4, 2, "WALL", PAL_UI);   txt(0, 4, 3, "STOPS YOU", PAL_UI);
-            put_mt(0, 1, 4, MT_EXIT_OPEN); txt(0, 4, 4, "EXIT", PAL_UI); txt(0, 4, 5, "CATCHES YOU", PAL_UI);
+            put_mt(0, 0, 2, MT_WALL);   txt(0, 3, 2, "WALL", PAL_UI);   txt(0, 3, 3, "STOPS YOU", PAL_UI);
+            put_mt(0, 0, 4, MT_EXIT_OPEN); txt(0, 3, 4, "EXIT", PAL_UI); txt(0, 3, 5, "CATCHES YOU", PAL_UI);
             for (m = 0; m < NUM_MECH; m++) {
                 y = (uint8_t)(6 + m * 2);
                 known = (uint8_t)(seen >= mech_unlock_at[m]);
                 if (known) {
-                    put_mt(0, 1, y, mech_mt[m]);
-                    txt(0, 4, y, mech_name[m], PAL_UI);
-                    txt(0, 4, (uint8_t)(y + 1), mech_desc[m], PAL_UI);
+                    put_mt(0, 0, y, mech_mt[m]);
+                    txt(0, 3, y, mech_name[m], PAL_AMBER);
+                    txt(0, 3, (uint8_t)(y + 1), mech_desc[m], PAL_UI);
                 } else {
-                    txt(0, 1, y, "??", PAL_UI);
-                    txt(0, 4, y, "UNDISCOVERED", PAL_UI);
-                    txt(0, 4, (uint8_t)(y + 1), "SECTOR", PAL_UI);
-                    txt_num(0, 11, (uint8_t)(y + 1), mech_unlock_at[m], 2, PAL_UI);
+                    txt(0, 0, y, "??", PAL_UI);
+                    txt(0, 3, y, "UNDISCOVERED", PAL_UI);
+                    txt(0, 3, (uint8_t)(y + 1), "SECTOR", PAL_UI);
+                    txt_num(0, 10, (uint8_t)(y + 1), mech_unlock_at[m], 2, PAL_UI);
                 }
             }
         }
