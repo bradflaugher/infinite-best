@@ -11,6 +11,10 @@
 uint8_t solve(const Level *L, const State *from) CORE_BANKED;
 /* Number of distinct states visited by the last solve() (a branching/quality metric). */
 extern uint16_t solve_visited;
+/* BFS with the exit switched off: the floor cell you can stop on (with every chip
+ * collected) that is furthest from *from, or NO_POS. *depth_out = its distance.
+ * Moving the exit there makes a board about as deep as its layout allows. */
+uint8_t solve_far(const Level *L, const State *from, uint8_t *depth_out) CORE_BANKED;
 /* Best next direction from *from (0..3), or 0xFF if unsolvable. *remaining = moves left incl. this one. */
 uint8_t solve_hint(const Level *L, const State *from, uint8_t *remaining) CORE_BANKED;
 

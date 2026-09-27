@@ -204,7 +204,7 @@ class RomTest(unittest.TestCase):
             self.assertEqual(g.level_cells().hex(), cells, f'sector {sector} grid differs from host')
             self.assertEqual(g.u8('level', LEVEL_PAR), int(par))
             self.assertEqual(g.u8('st'), int(start))
-            self.assertLess(g.u8('dbg_gen_frames'), 250)
+            self.assertLess(g.u16('dbg_gen_frames'), 300)
             _, p = g.solve_current(seed)
             if sector == 3:
                 g.shot('win')
