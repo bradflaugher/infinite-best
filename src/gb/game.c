@@ -29,8 +29,9 @@ uint16_t dbg_seed;          /* test hook: if non-zero, used as the seed of the n
 uint8_t dbg_gen_frames;     /* frames the last generation took */
 
 static uint8_t keys, prev_keys, pressed;
-static State hist[64];
-static uint8_t hist_top, hist_n;
+static State hist[256];          /* ring buffer; uint8_t hist_top wraps for free */
+static uint8_t hist_top;
+static uint16_t hist_n;
 static Path path;
 static State pending;
 static uint8_t pending_r;
@@ -202,14 +203,14 @@ static void hud_draw(void)
 static void hist_push(const State *s)
 {
     hist[hist_top] = *s;
-    hist_top = (uint8_t)((hist_top + 1) & 63);
-    if (hist_n < 64) hist_n++;
+    hist_top++;
+    if (hist_n < 256) hist_n++;
 }
 
 static uint8_t hist_pop(State *s)
 {
     if (!hist_n) return 0;
-    hist_top = (uint8_t)((hist_top - 1) & 63);
+    hist_top--;
     hist_n--;
     *s = hist[hist_top];
     return 1;
