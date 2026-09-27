@@ -38,7 +38,7 @@ shorter "breather". Par targets climb from ~3 to ~10 moves.
 
 ## Modes
 
-- **RUN** (the roguelike). You start with 24 energy, and each move costs 1. Clearing a sector refunds its par,
+- **RUN** (the roguelike). You start with 30 energy, and each move costs 1. Clearing a sector refunds its par,
   and a BEST also pays +2 plus a streak bonus. Hints cost 3. Hitting zero ends the run.
   An optimal player gains energy every sector, so the run ends when *you* slip.
   Each run has a seed (shown on pause / game over).
@@ -54,7 +54,12 @@ state space (position × collected chips × switch state, at most 1280 states).
 
 - Candidates whose par falls outside the sector's difficulty window are rejected.
 - On a teaching sector, the new mechanic must *matter*. The generator strips it out
-  and re-solves, and the level is rejected if the par doesn't change.
+  and re-solves, and the level is rejected if the par doesn't change. Teaching sectors
+  get 96 attempts instead of 48, so this holds on every seed.
+- Until sector 22, the sectors between lessons keep the newest mechanic on and ask it to
+  matter too (for the first 12 attempts, which bounds the extra solving). Without this,
+  the stop pads, routers, gates and portals were decoration on 40-80% of those boards.
+  Pits and routers, which rarely matter by chance, get one extra tile when they are the focus.
 - If nothing fits after 48 attempts, the closest solvable candidate is used. A hand-made
   fallback guarantees the game can never soft-lock.
 

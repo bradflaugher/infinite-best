@@ -6,7 +6,7 @@
  * spent energy never comes back ("time only flows forward for your battery").
  * Clearing a sector refunds its par; a BEST (par-perfect) clear pays a bonus that
  * grows with your streak. Hitting zero ends the run. */
-#define RUN_START_ENERGY 24
+#define RUN_START_ENERGY 30
 #define RUN_MAX_ENERGY   99
 #define RUN_HINT_COST    3
 #define RUN_BEST_BONUS   2

@@ -9,6 +9,11 @@ const uint8_t mech_unlock[NUM_MECH] = {
     UNLOCK_STOP, UNLOCK_CHIP, UNLOCK_PIT, UNLOCK_ARROW, UNLOCK_GATE, UNLOCK_PORTAL
 };
 
+/* Reinforcement sectors ask the newest mechanic to matter for this many attempts,
+ * then settle for any in-window board (bounds the extra solves). Teaching sectors
+ * always insist. */
+#define GEN_FOCUS_ATTEMPTS 12
+
 static Level cand;
 static Level variant;
 
@@ -48,6 +53,7 @@ void gen_params(uint16_t sector, GenParams *p) CORE_BANKED
     if (pmax > pmin + 6) pmax = (uint8_t)(pmin + 6);
 
     p->featured = gen_new_mech(sector);
+    p->focus = p->featured;
     p->mechs = 0;
 
     if (p->featured != 0xFF) {
@@ -66,8 +72,10 @@ void gen_params(uint16_t sector, GenParams *p) CORE_BANKED
         /* most recent mechanic stays on, older ones come and go */
         for (m = 0; m < NUM_MECH; m++) {
             if (!(unlocked & MBIT(m))) continue;
-            if (m + 1 == NUM_MECH || !(unlocked & MBIT(m + 1))) p->mechs |= MBIT(m);
-            else if (rng_range(2)) p->mechs |= MBIT(m);
+            if (m + 1 == NUM_MECH || !(unlocked & MBIT(m + 1))) {
+                p->mechs |= MBIT(m);
+                p->focus = m;   /* the newest idea must keep mattering */
+            } else if (rng_range(2)) p->mechs |= MBIT(m);
         }
     } else {
         /* freeform: 2..4 random mechanics */
@@ -147,9 +155,10 @@ static void build(Level *L, const GenParams *p, uint16_t sector)
         }
     }
     if (mech & MBIT(M_STOP)) place(L, T_STOP, (uint8_t)(1 + rng_range(3)));
-    if (mech & MBIT(M_PIT)) place(L, T_PIT, (uint8_t)(2 + rng_range(4)));
+    /* pits and routers rarely matter by chance: the focus mechanic gets one more */
+    if (mech & MBIT(M_PIT)) place(L, T_PIT, (uint8_t)(2 + (p->focus == M_PIT) + rng_range(4)));
     if (mech & MBIT(M_ARROW)) {
-        n = (uint8_t)(1 + rng_range(3));
+        n = (uint8_t)(1 + (p->focus == M_ARROW) + rng_range(3));
         while (n--) place(L, (uint8_t)(T_ARROW_U + rng_range(4)), 1);
     }
     if (mech & MBIT(M_GATE)) {
@@ -213,19 +222,23 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
     GenParams p;
     State s;
     uint8_t attempt, par, dist, best_dist = 0xFF;
-    uint8_t phase;
+    uint8_t phase, limit;
 
     rng_seed(rng_mix(run_seed, sector));
     gen_params(sector, &p);
     L->par = 0;
 
+    /* teaching sectors must land: they get a longer search */
+    limit = p.featured != 0xFF ? GEN_TEACH_ATTEMPTS : GEN_MAX_ATTEMPTS;
     for (phase = 0; phase < 2 && best_dist != 0; phase++) {
         if (phase == 1) {
             if (L->par) break;      /* have a usable fallback already */
             p.mechs &= MBIT(M_STOP); /* simplify hard */
             p.featured = 0xFF;
+            p.focus = 0xFF;
+            limit = GEN_MAX_ATTEMPTS;
         }
-        for (attempt = 0; attempt < GEN_MAX_ATTEMPTS; attempt++) {
+        for (attempt = 0; attempt < limit; attempt++) {
             if (progress) progress(attempt);
             build(&cand, &p, sector);
             state_start(&cand, &s);
@@ -233,11 +246,12 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
             if (par == SOLVE_NONE) continue;
             cand.par = par;
             dist = window_dist(par, &p);
-            if (dist == 0 && p.featured != 0xFF && !mech_matters(&cand, p.featured))
-                dist = 1; /* teaching level must actually use the new idea */
+            if (dist == 0 && p.focus != 0xFF && (p.featured != 0xFF || attempt < GEN_FOCUS_ATTEMPTS)
+                && !mech_matters(&cand, p.focus))
+                dist = 1; /* the new idea must actually change the solution */
             if (dist < best_dist) {
                 best_dist = dist;
-                cand.attempts = (uint8_t)(attempt + 1 + phase * GEN_MAX_ATTEMPTS);
+                cand.attempts = (uint8_t)(attempt + 1 + phase * GEN_TEACH_ATTEMPTS);
                 *L = cand;
                 if (dist == 0) break;
             }
