@@ -64,7 +64,7 @@ typedef struct {
     uint8_t par;        /* optimal number of moves, 0 = unsolved/unsolvable */
     uint8_t mechs;      /* bitmask of MBIT(M_*) present */
     uint8_t featured;   /* mechanic introduced this sector or 0xFF */
-    uint8_t attempts;   /* generator attempts used (stats) */
+    uint8_t attempts;   /* solver calls the generator used (stats), 0xFF = fallback room */
     uint16_t sector;
 } Level;
 

@@ -348,8 +348,10 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
     /* 1) random candidates: early sectors usually land here */
     limit = p.featured != 0xFF ? GEN_TEACH_ATTEMPTS : GEN_RANDOM_ATTEMPTS;
     if (p.par_min >= GEN_DEEP_PAR) limit = GEN_DEEP_RANDOM; /* rolls rarely get this deep: climb sooner */
-    /* (keep rolling past the limit until something is solvable to climb from) */
-    for (attempt = 0; (attempt < limit || !L->par) && attempt < GEN_MAX_ATTEMPTS && gen_cost < GEN_BUDGET;
+    /* (keep rolling past the limit until something is solvable to climb from; teaching
+     * sectors are small and must land, so they get all their rolls regardless of budget) */
+    for (attempt = 0; (attempt < limit || !L->par) && attempt < (limit > GEN_MAX_ATTEMPTS ? limit : GEN_MAX_ATTEMPTS)
+         && (p.featured != 0xFF || gen_cost < GEN_BUDGET);
          attempt++) {
         if (progress) progress(step++);
         build(&cand, &p, sector);
@@ -358,7 +360,7 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
         if (dist != 0 && dist != 0xFF && cand.par < p.par_min) {
             /* too shallow: first see how deep this layout can go */
             if (dist < best_dist) { best_dist = dist; *L = cand; }
-            if (exit_far()) dist = evaluate(&p, insist);
+            if (gen_cost < GEN_BUDGET && exit_far() && gen_cost < GEN_BUDGET) dist = evaluate(&p, insist);
         }
         if (dist < best_dist) {
             best_dist = dist;

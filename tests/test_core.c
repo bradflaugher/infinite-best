@@ -435,7 +435,7 @@ static void test_endless_curve(void)
     CHECK(par[2] > par[1]);
     CHECK(par[3] > par[1]);                 /* 250 vs 500 is within noise at 8 seeds */
     CHECK(inwin * 10 >= total * 7);         /* >= 70% land in their window */
-    CHECK(worst < GEN_BUDGET + 400);        /* budget is checked between solves */
+    CHECK(worst < GEN_BUDGET + 1000);       /* checked between solves: one can overshoot */
 }
 
 static void test_run_economy(void)

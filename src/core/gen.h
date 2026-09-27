@@ -20,7 +20,7 @@
 #define GEN_CLIMB_STALL 20      /* fruitless edits before the climb restarts */
 #define GEN_SOLVE_OVERHEAD 5    /* per-solve setup, in visited-state units */
 #define GEN_BUDGET 2600         /* ~200 frames on a DMG, ~100 on a Color */
-#define GEN_TEACH_ATTEMPTS 96   /* teaching sectors search longer */
+#define GEN_TEACH_ATTEMPTS 96   /* teaching sectors roll longer (and ignore GEN_BUDGET) */
 
 typedef struct {
     uint8_t par_min;

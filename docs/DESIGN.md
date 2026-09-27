@@ -63,7 +63,8 @@ places wall clusters, then start, exit, chips, pads, pits, routers, gates and po
 Then `src/core/solver.c` runs a breadth-first search over the full state space
 (position × collected chips × switch state, at most 1280 states) to find par.
 
-1. **Random rolls.** Up to 16 random boards (96 on teaching sectors, 4 once the par floor
+1. **Random rolls.** Up to 16 random boards (96 on teaching sectors, which ignore the budget
+   so every lesson lands, 4 once the par floor
    reaches 11, since rolls rarely get that deep). A board that comes out too shallow first
    gets its exit moved to the stop furthest from the start (`solve_far`: a BFS with the exit
    switched off). That makes the board about as deep as its layout allows, for one extra BFS.
@@ -98,7 +99,9 @@ The BFS inner loop, one slide across the board, is hand-written SM83 assembly
 (`fast_move` in `solver.c`). The portable C version next to it is the reference. The grid is
 stored with a wall border (12×10) so the slide needs no bounds checks, divisions or
 multiplications. One solve costs about 0.4 frames plus 0.075 frames per state visited on a
-DMG, so the budget works out at about 230 frames (under 4 s) at worst. Typical sectors take 0.2-1.5 s
+DMG, so the budget works out at about 200 frames. The budget is checked between solves and one deep solve
+can overshoot it: the worst seen over 100,000 sectors was 259 frames (4.3 s), and fewer than 1 in
+1,000 take over 3.8 s. Typical sectors take 0.2-1.5 s
 on an original Game Boy and about half that in Game Boy Color double-speed mode. The time runs
 while the clear banner is up (a "COMPILING" line with scrolling hex), and a long compile
 shortens the banner's reading pause by the same amount.

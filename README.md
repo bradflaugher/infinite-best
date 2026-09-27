@@ -113,8 +113,8 @@ CGB-enhanced: colour and double speed on Color hardware, fully playable on an or
 - **Speed.** The slide inside the BFS is hand-written assembly over a wall-padded 12×10 grid,
   so it needs no bounds checks, multiplies or divides. It is about 10× faster than the
   compiler's version. Generation runs on a fixed work budget (the same on every machine, so it
-  stays deterministic): typically 0.2–1.5 s on a DMG and about half that on a Color, under 4 s
-  at worst, while the clear banner is up.
+  stays deterministic): typically 0.2–1.5 s on a DMG and about half that on a Color, and fewer
+  than 1 sector in 1,000 takes over 4 s. It runs while the clear banner is up.
 - **Determinism.** Everything is fixed-width integer maths on a 16-bit xorshift, so the Game Boy
   and a PC generate *byte-identical* sectors, and CI checks this.
 - **Sound.** A custom 4-channel driver runs from VBlank. It has instruments, arpeggios, vibrato,
