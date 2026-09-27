@@ -44,6 +44,7 @@ static uint8_t rewind_t;
 static uint8_t cur_song = 0xFF;
 static uint8_t exit_anim;
 static uint16_t seed_acc;
+static uint16_t record_at_start;  /* save.run_best_sector when the run began */
 
 static const char *const mech_name[NUM_MECH] = {
     "STOP PAD", "DATA CHIP", "NULL PIT", "ROUTER", "TOGGLE GATES", "PORTAL"
@@ -299,7 +300,10 @@ static void game_over(void)
     game_state = GS_OVER;
     ps = PS_IDLE;
     if (run.mode == MODE_RUN) {
-        if (reached > save.run_best_sector) { save.run_best_sector = reached; record = 1; }
+        /* win() already raises save.run_best_sector after every clear, so compare
+         * against the record as it stood when this run started */
+        if (reached > record_at_start) record = 1;
+        if (reached > save.run_best_sector) save.run_best_sector = reached;
         if (run.bests > save.run_best_bests) save.run_best_bests = run.bests;
         if (run.best_streak > save.run_best_streak) save.run_best_streak = run.best_streak;
     }
@@ -322,7 +326,7 @@ static void game_over(void)
     txt(0, 4, 9, "BESTS", PAL_UI);     txt_num(0, 13, 9, run.bests, 4, PAL_UI);
     txt(0, 3, 11, "STREAK", PAL_UI);   txt_num(0, 13, 11, run.best_streak, 4, PAL_UI);
     txt(0, 3, 13, "SEED", PAL_UI);     txt_hex(0, 13, 13, run.seed, PAL_CHIP);
-    txt(0, 3, 16, "RECORD SECTOR", PAL_UI); txt_num(0, 17, 16, save.run_best_sector, 3, PAL_AMBER);
+    txt(0, 3, 16, "RECORD", PAL_UI);    txt_num(0, 13, 16, save.run_best_sector, 4, PAL_AMBER);
     while (1) {
         tick();
         t++;
@@ -461,7 +465,7 @@ static void win(void)
     else if (grade == GRADE_GOOD) txt(1, 7, 2, "GOOD.", PAL_CHIP);
     else txt(1, 6, 2, "SOLVED.", PAL_UI);
     txt(1, 2, 3, "MOVES", PAL_UI);
-    txt_num(1, 8, 3, moves, 2, PAL_UI);
+    txt_num(1, 8, 3, moves > 99 ? 99 : moves, 2, PAL_UI);
     txt(1, 12, 3, "PAR", PAL_UI);
     txt_num(1, 16, 3, level.par, 2, PAL_UI);
     if (run.mode == MODE_RUN) {
@@ -472,7 +476,7 @@ static void win(void)
     }
     put_tile(1, 12, 4, UI_STAR, PAL_HUD_ACCENT);
     txt(1, 13, 4, "X", PAL_UI);
-    txt_num(1, 14, 4, run.streak, 2, PAL_UI);
+    txt_num(1, 14, 4, run.streak > 99 ? 99 : run.streak, 2, PAL_UI);
     txt(1, 2, 5, "COMPILING", PAL_UI);
     move_win(7, 80);
     wait_frames(4);
@@ -654,6 +658,7 @@ static void do_hint(void)
 static void play(void)
 {
     uint8_t sel;
+    record_at_start = save.run_best_sector;
     start_level();
     while (game_state == GS_PLAY) {
         tick();
@@ -683,6 +688,7 @@ static void play(void)
                 sel = pause_menu();
                 if (sel == 1) {
                     hist_push(&st);
+                    hint_hide();
                     state_start(&level, &st);
                     anim_chips = 0; anim_sw = 0;
                     draw_dynamic(&level, 0, 0, exit_anim);
