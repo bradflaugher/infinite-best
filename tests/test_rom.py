@@ -244,17 +244,38 @@ class RomTest(unittest.TestCase):
         g.press('a', after=10)
         self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_TITLE, 600))
 
-    def test_codex(self):
+    def test_seed_entry(self):
         g = self.g
         g.wait(lambda: g.u8('game_state') == GS_TITLE)
         g.run(20)
         g.press('down')
         g.press('down')
         g.press('a', after=20)
+        self.assertTrue(g.wait(lambda: 'ENTER SEED' in g.screen_text(), 300))
+        g.run(10)
+        # default shown is 1D0B; set it to 2D0A: first digit up, last digit down
+        g.press('up')
+        g.press('left')
+        g.press('down')
+        g.shot('seed')
+        g.press('a', after=5)
+        self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_PLAY, 3000))
+        self.assertEqual(g.u16('run', 1), 0x2D0A)
+        g.skip_intro()
+        par, _, cells = ibgen('dump', 0x2D0A, 1)
+        self.assertEqual(g.level_cells().hex(), cells)
+
+    def test_codex(self):
+        g = self.g
+        g.wait(lambda: g.u8('game_state') == GS_TITLE)
+        g.run(20)
+        g.press('up')          # wraps to CODEX
+        g.press('a', after=20)
         self.assertEqual(g.u8('game_state'), GS_CODEX)
-        self.assertIn('HOW IT WORKS', g.screen_text())
-        g.press('right', after=20)
-        self.assertIn('CODEX', g.screen_text())
+        self.assertTrue(g.wait(lambda: 'HOW IT WORKS' in g.screen_text(), 300))
+        g.press('right', after=5)
+        self.assertTrue(g.wait(lambda: 'CODEX' in g.screen_text(), 300))
+        g.run(10)
         g.shot('codex')
         g.press('b', after=20)
         self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_TITLE, 200))

@@ -242,6 +242,8 @@ static void generate(uint8_t row)
 static void mech_intro(void)
 {
     uint8_t m = level.featured, t = 0;
+    for (t = 0; t < 8; t++) hide_sprite(SP_PLAYER + t);
+    t = 0;
     move_win(7, 96);
     draw_box(1, 0, 0, 20, 6, PAL_UI);
     txt(1, 2, 1, "NEW PROTOCOL", PAL_AMBER);
@@ -606,8 +608,7 @@ static uint8_t pause_menu(void)
     for (i = 0; i < 4; i++) txt(1, 4, (uint8_t)(1 + i), items[i], PAL_UI);
     txt(1, 2, 6, "SEED", PAL_UI);
     txt_hex(1, 7, 6, run.seed, PAL_CHIP);
-    txt(1, 12, 6, "S", PAL_UI);
-    txt_num(1, 13, 6, run.sector, 4, PAL_UI);
+    txt(1, 12, 6, BUILD_DATE + 2, PAL_UI);
     move_win(7, 80);
     for (;;) {
         tick();
@@ -790,7 +791,7 @@ static void codex(void)
 
 static uint8_t title(void)
 {
-    static const char *const items[3] = { "RUN", "ZEN", "CODEX" };
+    static const char *const items[4] = { "RUN", "ZEN", "SEED", "CODEX" };
     uint8_t sel = 0, t = 0, i;
 
     game_state = GS_TITLE;
@@ -801,15 +802,13 @@ static uint8_t title(void)
     clear_bkg();
     gfx_load_logo();
     gfx_draw_logo(1);
-    for (i = 0; i < 3; i++) txt(0, 8, (uint8_t)(10 + i * 2), items[i], PAL_UI);
-    txt(0, 13, 12, "S", PAL_UI);
-    txt_num(0, 14, 12, save.zen_sector, 4, PAL_UI);
-    txt(0, 1, 16, "RECORD", PAL_UI);
-    txt_num(0, 8, 16, save.run_best_sector, 4, PAL_AMBER);
-    put_tile(0, 13, 16, UI_STAR, PAL_HUD_ACCENT);
-    txt_num(0, 14, 16, save.lifetime_bests, 5, PAL_UI);
-    txt(0, 1, 17, BUILD_DATE, PAL_UI);
-    if (is_cgb) txt(0, 15, 17, "COLOR", PAL_CHIP);
+    for (i = 0; i < 4; i++) txt(0, 8, (uint8_t)(9 + i * 2), items[i], PAL_UI);
+    txt(0, 13, 11, "S", PAL_UI);
+    txt_num(0, 14, 11, save.zen_sector, 4, PAL_UI);
+    txt(0, 1, 17, "RECORD", PAL_UI);
+    txt_num(0, 8, 17, save.run_best_sector, 4, PAL_AMBER);
+    put_tile(0, 13, 17, UI_STAR, PAL_HUD_ACCENT);
+    txt_num(0, 14, 17, save.lifetime_bests, 5, PAL_UI);
     wave_top = 8;
     wave_bottom = (uint8_t)(8 + LOGO_H * 8);
     fx_wave(1);
@@ -820,12 +819,12 @@ static uint8_t title(void)
         t++;
         set_sprite_tile(SP_CURSOR, SPR_CURSOR);
         set_sprite_prop(SP_CURSOR, SPAL_CURSOR);
-        move_sprite(SP_CURSOR, (uint8_t)(8 + 48 + ((t >> 3) & 1)), (uint8_t)(16 + 80 + sel * 16));
+        move_sprite(SP_CURSOR, (uint8_t)(8 + 48 + ((t >> 3) & 1)), (uint8_t)(16 + 72 + sel * 16));
         if ((t & 15) == 0)
             part_burst((uint8_t)(16 + (rng_next() & 127)), (uint8_t)(8 + (rng_next() & 31)), 2,
                        SPR_SPARK_SMALL, (uint8_t)(SPAL_SPARK + (t & 16 ? 2 : 0)), 1);
-        if (pressed & J_UP) { sel = (uint8_t)(sel ? sel - 1 : 2); sfx_play(SFX_MENU); }
-        if (pressed & (J_DOWN | J_SELECT)) { sel = (uint8_t)(sel == 2 ? 0 : sel + 1); sfx_play(SFX_MENU); }
+        if (pressed & J_UP) { sel = (uint8_t)(sel ? sel - 1 : 3); sfx_play(SFX_MENU); }
+        if (pressed & (J_DOWN | J_SELECT)) { sel = (uint8_t)(sel == 3 ? 0 : sel + 1); sfx_play(SFX_MENU); }
         if (pressed & (J_A | J_START)) break;
     }
     sfx_play(SFX_SELECT);
@@ -834,6 +833,50 @@ static uint8_t title(void)
     wave_bottom = HUD_WY;
     hide_sprite(SP_CURSOR);
     return sel;
+}
+
+/* Type a 4-hex-digit seed (like punching keys on a 12C): share a run with
+ * friends and family and compare BEST counts. Returns 0 on cancel. */
+static uint16_t seed_entry(void)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    uint8_t dig[4], cur = 0, i, redraw = 1;
+    uint16_t v = run.seed ? run.seed : 0x1D0B;
+    char c[2];
+    game_state = GS_CODEX;
+    for (i = 0; i < 4; i++) dig[i] = (uint8_t)((v >> (12 - i * 4)) & 15);
+    gfx_hide_all_sprites();
+    part_clear();
+    clear_bkg();
+    txt(0, 5, 2, "ENTER SEED", PAL_AMBER);
+    txt(0, 2, 12, "SAME SEED, SAME", PAL_UI);
+    txt(0, 2, 13, "SECTORS. RACE YOUR", PAL_UI);
+    txt(0, 2, 14, "FAMILY FOR BESTS.", PAL_UI);
+    txt(0, 2, 16, "A: RUN   B: BACK", PAL_CHIP);
+    c[1] = 0;
+    for (;;) {
+        if (redraw) {
+            for (i = 0; i < 4; i++) {
+                c[0] = hex[dig[i]];
+                txt(0, (uint8_t)(6 + i * 2), 7, c, i == cur ? PAL_AMBER : PAL_UI);
+                put_tile(0, (uint8_t)(6 + i * 2), 6, i == cur ? FONT_TILE('^') : TILE_BLANK, PAL_AMBER);
+                put_tile(0, (uint8_t)(6 + i * 2), 8, i == cur ? FONT_TILE('^') : TILE_BLANK, PAL_AMBER);
+            }
+            redraw = 0;
+        }
+        tick();
+        if (pressed & J_LEFT) { cur = (uint8_t)((cur + 3) & 3); redraw = 1; sfx_play(SFX_MENU); }
+        if (pressed & J_RIGHT) { cur = (uint8_t)((cur + 1) & 3); redraw = 1; sfx_play(SFX_MENU); }
+        if (pressed & J_UP) { dig[cur] = (uint8_t)((dig[cur] + 1) & 15); redraw = 1; sfx_play(SFX_MENU); }
+        if (pressed & J_DOWN) { dig[cur] = (uint8_t)((dig[cur] + 15) & 15); redraw = 1; sfx_play(SFX_MENU); }
+        if (pressed & J_B) { sfx_play(SFX_SELECT); return 0; }
+        if (pressed & (J_A | J_START)) {
+            v = (uint16_t)(((uint16_t)dig[0] << 12) | ((uint16_t)dig[1] << 8) | ((uint16_t)dig[2] << 4) | dig[3]);
+            if (!v) { sfx_play(SFX_ERROR); continue; }
+            sfx_play(SFX_SELECT);
+            return v;
+        }
+    }
 }
 
 static void loading_screen(void)
@@ -863,8 +906,12 @@ void game_main(void) BANKED
 
     for (;;) {
         choice = title();
-        if (choice == 2) { codex(); continue; }
-        if (choice == 0) {
+        if (choice == 3) { codex(); continue; }
+        if (choice == 2) {
+            uint16_t seed = seed_entry();
+            if (!seed) continue;
+            run_start(&run, MODE_RUN, seed, 1);
+        } else if (choice == 0) {
             uint16_t seed = dbg_seed ? dbg_seed : (uint16_t)(seed_acc ^ ((uint16_t)DIV_REG << 8) ^ frame);
             if (!seed) seed = 0xB357;
             run_start(&run, MODE_RUN, seed, 1);

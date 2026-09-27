@@ -3,6 +3,7 @@
 #include <string.h>
 #include "gfx.h"
 #include "assets.h"
+#include "sound.h"
 #include "../core/rng.h"
 
 BANKREF_EXTERN(assets)
@@ -41,16 +42,25 @@ static const uint16_t white_pal[8 * 4] = {
     0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF
 };
 
-/* HBlank handler: per-scanline horizontal offset for the Braid-style rewind
- * wave and the death glitch. Only enabled while an effect runs. */
+/* LYC handler: per-band horizontal offset for the Braid-style rewind wave and
+ * the death glitch. It chains itself every WAVE_STEP lines inside
+ * [wave_top, wave_bottom) and restores the scroll at wave_bottom, so a DMG only
+ * pays for ~20-30 interrupts per frame instead of 144 HBlanks. */
+#define WAVE_STEP 4
 static void lcd_isr(void)
 {
-    uint8_t ly = LY_REG;
-    if (ly < wave_top || ly >= wave_bottom) { SCX_REG = wave_base; return; }
+    uint8_t ly = LYC_REG, next;
+    if (ly >= wave_bottom) {
+        SCX_REG = wave_base;
+        LYC_REG = wave_top;
+        return;
+    }
     if (wave_mode == 1)
         SCX_REG = (uint8_t)(wave_base + wave_tab[(uint8_t)(ly + wave_phase) & 63]);
     else
         SCX_REG = (uint8_t)(wave_base + glitch_tab[(uint8_t)((ly >> 2) + wave_phase) & 31]);
+    next = (uint8_t)(ly + WAVE_STEP);
+    LYC_REG = next > wave_bottom ? wave_bottom : next;
 }
 
 static void vbl_isr(void)
@@ -60,6 +70,7 @@ static void vbl_isr(void)
     SCX_REG = (uint8_t)shake_x;
     SCY_REG = (uint8_t)shake_y;
     wave_phase++;
+    sound_tick();       /* after the timing-sensitive register writes */
 }
 
 void gfx_set_palettes(void)
@@ -326,7 +337,8 @@ void fx_wave(uint8_t mode)
     if (mode == 2)
         for (i = 0; i < 32; i++) glitch_tab[i] = (uint8_t)((rng_next() & 7) ? 0 : (rng_next() & 15) - 8);
     wave_mode = mode;
-    STAT_REG = mode ? STATF_MODE00 : 0;
+    LYC_REG = wave_top;
+    STAT_REG = mode ? STATF_LYC : 0;
     if (!mode) SCX_REG = (uint8_t)shake_x;
 }
 
