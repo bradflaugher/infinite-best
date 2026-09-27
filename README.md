@@ -23,8 +23,8 @@ Every sector has a **par**, the fewest possible moves. A real solver on the cart
 computes it while the next level loads. **Match par and you get a BEST.** There's no last level.
 The generator keeps inventing new sectors from a seed and teaching you new rules along the way.
 
-The game is built for short sessions: a sector takes a minute or two, the next one is ready in
-under a second, and the game saves after every clear. It aims to be thinky without wasting your time.
+The game is built for short sessions: a sector takes a minute or two, the next one compiles in
+a second or two while you read your grade, and the game saves after every clear. It aims to be thinky without wasting your time.
 
 ## What makes it tick
 
@@ -89,7 +89,7 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 | 11 | Router | Bends your slide. Two routers facing each other cause a `STACK OVERFLOW`. |
 | 14 | Toggle gates | A switch flips which gate colour is solid, even mid-slide. |
 | 18 | Portal | Warps you to its twin, keeping your momentum. |
-| 22+ | Everything | Sectors mix 2-4 mechanics. Every 7th sector is a breather. |
+| 22+ | Everything | Sectors mix 2-4 mechanics (3-5 from 80), and par keeps climbing for hundreds of sectors. Every 7th sector is a breather. |
 
 <p align="center">
   <img src="docs/screens/pause.png" width="240" alt="Pause menu">
@@ -102,16 +102,19 @@ The game is C, built with [GBDK-2020](https://github.com/gbdk-2020/gbdk-2020), w
 SM83 assembly where speed matters. The cartridge is **MBC5 + RAM + battery**, 64 KB,
 CGB-enhanced: colour and double speed on Color hardware, fully playable on an original DMG.
 
-- **The generator** (`src/core/gen.c`) builds a candidate sector for *(seed, sector)* from the
-  unlocked mechanics.
+- **The generator** (`src/core/gen.c`) rolls a few random sectors for *(seed, sector)* from the
+  unlocked mechanics, then hill-climbs the closest one: it toggles walls and moves tiles, and it
+  moves the exit to the stop furthest from the start, keeping edits that bring par into the
+  sector's window. Random rolls top out around par 10. The climb takes deep sectors to 13-15.
 - **The solver** (`src/core/solver.c`) runs a breadth-first search over every reachable
   *(position × chips × switch)* state, at most 1280 of them, to find the exact par. Candidates
   outside the sector's difficulty window are rejected. A hand-built fallback means the game
   can never soft-lock.
 - **Speed.** The slide inside the BFS is hand-written assembly over a wall-padded 12×10 grid,
   so it needs no bounds checks, multiplies or divides. It is about 10× faster than the
-  compiler's version. A sector generates in ~0.3–1 s on a DMG and about half that on a Color, hidden
-  behind the clear banner.
+  compiler's version. Generation runs on a fixed work budget (the same on every machine, so it
+  stays deterministic): typically 0.2–1.5 s on a DMG and about half that on a Color, under 4 s
+  at worst, while the clear banner is up.
 - **Determinism.** Everything is fixed-width integer maths on a 16-bit xorshift, so the Game Boy
   and a PC generate *byte-identical* sectors, and CI checks this.
 - **Sound.** A custom 4-channel driver runs from VBlank. It has instruments, arpeggios, vibrato,

@@ -10,6 +10,7 @@
 #include "../src/core/level.h"
 #include "../src/core/solver.h"
 #include "../src/core/gen.h"
+#include "../src/core/rng.h"
 
 static const char glyph[NUM_T] = {
     '.', '#', 'E', '*', '*', '*', 'o', '^', '>', 'v', '<', 'S', 'A', 'B', '@', 'X'
@@ -59,29 +60,34 @@ int main(int argc, char **argv)
         return 0;
     }
     if (!strcmp(argv[1], "stats")) {
+        /* attempts = solver calls; cost = gen_cost (~0.077 frames each on a DMG) */
         int seeds = atoi(argv[2]), sectors = atoi(argv[3]);
-        long total_att = 0, n = 0, maxatt = 0, fallback = 0, outwin = 0;
-        long visits = 0;
+        long n = 0, fallback = 0, inwin = 0, total_cost = 0, max_cost = 0, total_solves = 0;
         for (int sec = 1; sec <= sectors; sec++) {
-            long satt = 0, spar = 0, smax = 0;
+            long spar = 0, scost = 0, smax = 0, swin = 0;
             for (int s = 1; s <= seeds; s++) {
                 GenParams p;
-                gen_level(&L, (uint16_t)(s * 7919), (uint16_t)sec, 0);
-                total_att += L.attempts; satt += L.attempts; n++;
-                if (L.attempts > maxatt) maxatt = L.attempts;
-                if (L.attempts > smax) smax = L.attempts;
+                uint16_t seed = (uint16_t)(s * 7919);
+                gen_level(&L, seed, (uint16_t)sec, 0);
+                rng_seed(rng_mix(seed, (uint16_t)sec));
+                gen_params((uint16_t)sec, &p);
+                n++;
+                total_solves += gen_solves;
                 if (L.attempts == 0xFF) fallback++;
+                if (L.par >= p.par_min && L.par <= p.par_max) { inwin++; swin++; }
                 spar += L.par;
-                State st; state_start(&L, &st); solve(&L, &st); visits += solve_visited;
-                (void)p;
-                if (L.attempts > GEN_TEACH_ATTEMPTS) outwin++;
+                scost += gen_cost; total_cost += gen_cost;
+                if (gen_cost > smax) smax = gen_cost;
+                if (gen_cost > max_cost) max_cost = gen_cost;
             }
             if (sec <= 30 || sec % 25 == 0)
-                printf("sector %3d  avg par %5.2f  avg attempts %5.1f  max %ld\n",
-                       sec, (double)spar / seeds, (double)satt / seeds, smax);
+                printf("sector %4d  avg par %5.2f  in window %3ld%%  DMG frames avg %4.0f max %4.0f\n",
+                       sec, (double)spar / seeds, swin * 100 / seeds,
+                       (double)scost / seeds * 0.077, (double)smax * 0.077);
         }
-        printf("levels %ld  avg attempts %.2f  max %ld  phase2 %ld  fallback %ld  avg visited %.1f\n",
-               n, (double)total_att / n, maxatt, outwin, fallback, (double)visits / n);
+        printf("levels %ld  in window %ld%%  avg solves %.1f  DMG frames avg %.0f max %.0f  fallback %ld\n",
+               n, inwin * 100 / n, (double)total_solves / n, (double)total_cost / n * 0.077,
+               (double)max_cost * 0.077, fallback);
         return 0;
     }
     return 2;

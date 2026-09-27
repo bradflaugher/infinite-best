@@ -240,6 +240,51 @@ uint8_t solve(const Level *L, const State *from) CORE_BANKED
     return SOLVE_NONE;
 }
 
+uint8_t solve_far(const Level *L, const State *from, uint8_t *depth_out) CORE_BANKED
+{
+    uint16_t head = 0, tail = 0, layer_end;
+    uint16_t id;
+    uint8_t depth = 0, d, r, lo, i, far = NO_POS, far_depth = 0;
+    State s;
+
+    memset(visited, 0, sizeof visited);
+    fast_setup(L);
+    for (i = 0; i < GN; i++)
+        if (f_grid[i] == T_EXIT) f_grid[i] = T_FLOOR;
+    id = STATE_ID(from);
+    visited[id >> 3] |= bitmask[id & 7];
+    queue[tail++] = id;
+    solve_visited = 1;
+
+    while (head < tail && depth < SOLVE_MAX_DEPTH) {
+        layer_end = tail;
+        depth++;
+        while (head < layer_end) {
+            id = queue[head++];
+            lo = (uint8_t)id;
+            s.pos = (uint8_t)(lo & 0x7F);
+            s.sw = (uint8_t)(lo >> 7);
+            s.chips = (uint8_t)(id >> 8);
+            for (d = 0; d < 4; d++) {
+                f_pos = s.pos; f_chips = s.chips; f_sw = s.sw;
+                r = fast_move(d);
+                if (r != MV_OK) continue;
+                id = (uint16_t)((uint8_t)(f_pos | (uint8_t)(f_sw << 7)) | ((uint16_t)f_chips << 8));
+                if (visited[id >> 3] & bitmask[(uint8_t)id & 7]) continue;
+                visited[id >> 3] |= bitmask[(uint8_t)id & 7];
+                solve_visited++;
+                if (tail < QUEUE_MAX) queue[tail++] = id;
+                if (f_chips == f_full && f_grid[f_pos] == T_FLOOR && f_pos != from->pos) {
+                    far = f_pos;
+                    far_depth = depth;
+                }
+            }
+        }
+    }
+    if (depth_out) *depth_out = far_depth;
+    return far;
+}
+
 uint8_t solve_hint(const Level *L, const State *from, uint8_t *remaining) CORE_BANKED
 {
     uint8_t d, r, best = 0xFF, best_len = 0xFF, len;

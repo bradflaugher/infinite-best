@@ -404,6 +404,40 @@ static void test_difficulty_curve(void)
     CHECK(late > early * 2);
 }
 
+/* "Infinite" means no plateau: the par floor keeps rising well past the tutorial
+ * arc, deep boards actually reach it, and generation stays inside its budget. */
+static void test_endless_curve(void)
+{
+    static const uint16_t band[] = { 36, 100, 250, 500 };
+    long par[4] = { 0, 0, 0, 0 };
+    uint16_t seed, sec, prev_min = 0, worst = 0;
+    uint8_t b, k, inwin = 0, total = 0;
+    GenParams p;
+    Level L;
+    for (b = 0; b < 4; b++) {
+        rng_seed(1); gen_params((uint16_t)(band[b] + 1), &p);
+        CHECK(p.par_min > prev_min);
+        prev_min = p.par_min;
+        for (k = 1; k <= 6; k++) {          /* one 7-sector block, skip the breather */
+            sec = (uint16_t)(band[b] + k);
+            if (sec % 7 == 0) continue;
+            for (seed = 1; seed <= 8; seed++) {
+                gen_level(&L, (uint16_t)(seed * 4099u), sec, 0);
+                rng_seed(rng_mix((uint16_t)(seed * 4099u), sec)); gen_params(sec, &p);
+                par[b] += L.par;
+                total++;
+                if (L.par >= p.par_min && L.par <= p.par_max) inwin++;
+                if (gen_cost > worst) worst = gen_cost;
+            }
+        }
+    }
+    CHECK(par[1] > par[0]);
+    CHECK(par[2] > par[1]);
+    CHECK(par[3] > par[1]);                 /* 250 vs 500 is within noise at 8 seeds */
+    CHECK(inwin * 10 >= total * 7);         /* >= 70% land in their window */
+    CHECK(worst < GEN_BUDGET + 400);        /* budget is checked between solves */
+}
+
 static void test_run_economy(void)
 {
     Run r;
@@ -469,6 +503,7 @@ int main(void)
     test_teaching_levels();
     test_mechanics_matter();
     test_difficulty_curve();
+    test_endless_curve();
     test_run_economy();
     printf("core: %d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;

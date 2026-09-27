@@ -26,7 +26,7 @@ Level level;
 State st;
 Run run;
 uint16_t dbg_seed;          /* test hook: if non-zero, used as the seed of the next RUN */
-uint8_t dbg_gen_frames;     /* frames the last generation took */
+uint16_t dbg_gen_frames;    /* frames the last generation took */
 
 static uint8_t keys, prev_keys, pressed;
 static State hist[256];          /* ring buffer; uint8_t hist_top wraps for free */
@@ -237,12 +237,12 @@ void gen_progress(uint8_t attempt);
 
 static void generate(uint8_t row)
 {
-    uint8_t f0 = frame;
+    uint16_t f0 = sys_time;
     gen_row = row;
     gen_col = 2;
     sfx_play(SFX_GEN);
     gen_level(&level, run.seed, run.sector, gen_progress);
-    dbg_gen_frames = (uint8_t)(frame - f0);
+    dbg_gen_frames = (uint16_t)(sys_time - f0);
 }
 
 /* ---------------------------------------------------------------- level start */
@@ -442,7 +442,7 @@ static void death(void)
 
 static void win(void)
 {
-    uint8_t grade, gain, t;
+    uint8_t grade, gain, t, wait;
     uint16_t cleared_sector = run.sector;
     uint8_t moves = run.moves;
 
@@ -500,8 +500,10 @@ static void win(void)
     txt(1, 2, 5, "SECTOR", PAL_UI);
     txt_num(1, 9, 5, run.sector, 4, PAL_AMBER);
     txt(1, 14, 5, "READY", PAL_CHIP);
-    /* long enough to read the grade; A skips */
-    for (t = 0; t < 150; t++) {
+    /* long enough to read the grade (which was already up while compiling, so a
+     * long compile shortens the wait); A skips */
+    wait = dbg_gen_frames >= 120 ? 30 : (uint8_t)(150 - dbg_gen_frames);
+    for (t = 0; t < wait; t++) {
         tick();
         if (t & 8) txt(1, 6, 6, "A: CONTINUE", PAL_UI);
         else gfill(1, 6, 6, 11, 1, TILE_BLANK, PAL_UI);
