@@ -85,14 +85,21 @@ class Game:
         os.makedirs(SHOTS, exist_ok=True)
         self.pb.screen.image.save(os.path.join(SHOTS, f'{self.tag}_{name}.png'))
 
-    def screen_text(self):
+    def screen_text(self, base=0x9800):
         """Decode the BG map (font tiles are ASCII-32) to find on-screen strings."""
         m = self.pb.memory
         rows = []
         for y in range(18):
-            rows.append(''.join(chr(m[0x9800 + y * 32 + x] + 32) if m[0x9800 + y * 32 + x] < 64 else ' '
+            rows.append(''.join(chr(m[base + y * 32 + x] + 32) if m[base + y * 32 + x] < 64 else ' '
                                 for x in range(20)))
         return '\n'.join(rows)
+
+    def win_text(self):
+        """Same for the window map (HUD, banners, pause box)."""
+        return self.screen_text(0x9C00)
+
+    def win_tile(self, x, y):
+        return self.pb.memory[0x9C00 + y * 32 + x]
 
     def start_run(self, seed):
         assert self.wait(lambda: self.u8('game_state') == GS_TITLE)
@@ -206,6 +213,8 @@ class RomTest(unittest.TestCase):
             g.continue_after_win()
             # optimal play keeps the BEST streak alive and never loses energy
             self.assertEqual(g.u8('run', RUN_STREAK), sector)
+            # the HUD shows the whole streak (it used to clamp to one digit)
+            self.assertEqual(g.win_text().split('\n')[0][18:20], '%02d' % sector)
         g.shot('sector7')
 
     def test_rewind_restores_state(self):
@@ -245,10 +254,54 @@ class RomTest(unittest.TestCase):
         g.press('start', after=10)
         self.assertEqual(g.u8('ps'), PS_PAUSE)
         g.shot('pause')
+        # seed + build date fit inside the box: its right edge is intact
+        box_r = g.win_tile(19, 1)
+        for y in range(1, 7):
+            self.assertEqual(g.win_tile(19, y), box_r, f'pause box edge broken at row {y}')
         g.press('down')
         g.press('a', after=10)
         self.assertTrue(g.wait(g.ready, 300))
         self.assertEqual(g.u8('st'), start)
+
+    def test_move_buffered_during_slide(self):
+        """A direction tapped while still sliding plays when the slide lands."""
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        _, moves = ibgen('solve', seed, 1)
+        g.pb.button_press(DIRS[moves[0]]); g.run(2); g.pb.button_release(DIRS[moves[0]])
+        g.run(2)
+        self.assertEqual(g.u8('ps'), PS_SLIDE)
+        g.press(DIRS[moves[1]], hold=2, after=1)
+        self.assertTrue(g.wait(lambda: g.u8('run', RUN_MOVES) == 2, 400))
+        g.run(2)
+        self.assertTrue(g.wait(g.ready, 400))
+        for d in moves[2:]:
+            g.wait(g.ready, 600)
+            g.move(d)
+        self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_GEN or g.ps_in(PS_WIN), 600))
+        self.assertEqual(g.u16('run', RUN_SECTOR), 2)
+
+    def test_hold_b_without_history(self):
+        """Holding B on a fresh sector complains once and stops the wave on release."""
+        g = self.g
+        g.start_run(0x0042)
+        g.pb.button_press('b')
+        g.run(8)
+        self.assertIn('NO HISTORY', g.win_text())
+        g.run(60)
+        g.pb.button_release('b')
+        g.run(3)
+        self.assertTrue(g.ready())
+        # moves still work right after
+        start = g.u8('st')
+        for d in 'RDLU':
+            g.move(d)
+            if g.u8('st') != start:
+                break
+        self.assertNotEqual(g.u8('st'), start)
+        # and the "NO HISTORY" line is gone once you move
+        self.assertNotIn('NO HISTORY', g.win_text())
 
     def test_energy_runs_out(self):
         g = self.g
@@ -267,6 +320,8 @@ class RomTest(unittest.TestCase):
                         g.continue_after_win()
         self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_OVER, 600))
         self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 600))
+        # first run on a fresh save always beats the record
+        self.assertTrue(g.wait(lambda: 'NEW RECORD!' in g.screen_text(), 120))
         g.run(70)
         g.shot('gameover')
         g.press('a', after=10)
