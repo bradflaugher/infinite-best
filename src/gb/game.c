@@ -231,17 +231,16 @@ static void music_for_sector(void)
 
 /* ---------------------------------------------------------------- generation */
 
-/* gen_progress must be in bank 0: the banked generator calls it through a pointer */
-extern uint8_t gen_row, gen_col;
-void gen_progress(uint8_t attempt);
-
 static void generate(uint8_t row)
 {
     uint16_t f0 = sys_time;
-    gen_row = row;
-    gen_col = 2;
+    gfill(1, 2, row, 16, 1, TILE_BLANK, PAL_UI);   /* sets the CGB attributes too */
     sfx_play(SFX_GEN);
-    gen_level(&level, run.seed, run.sector, gen_progress);
+    gen_cost = 0;       /* before the ISR reads it, or it shows the last sector's work */
+    busy_start(2, row);
+    gen_level(&level, run.seed, run.sector, 0);
+    busy_stop();
+    gfill(1, 2, row, 16, 1, UI_BAR_FULL, PAL_UI);
     dbg_gen_frames = (uint16_t)(sys_time - f0);
 }
 

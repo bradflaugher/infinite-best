@@ -45,6 +45,9 @@ void draw_dynamic(const Level *L, uint8_t chips, uint8_t sw, uint8_t anim);
 /* ---- FX ---- */
 void fx_shake(uint8_t amount);
 void fx_flash(uint8_t frames);
+/* VBlank-driven progress bar on window row `row` from column x (16 cells) */
+void busy_start(uint8_t x, uint8_t row);
+void busy_stop(void);
 void fx_wave(uint8_t mode);   /* 0 off, 1 gentle wave, 2 glitch */
 void fx_update(void);         /* once per frame from main loop, after wait_vbl_done */
 extern int8_t shake_x, shake_y;

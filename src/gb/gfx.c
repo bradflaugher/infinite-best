@@ -5,6 +5,7 @@
 #include "assets.h"
 #include "sound.h"
 #include "../core/rng.h"
+#include "../core/gen.h"
 
 BANKREF_EXTERN(assets)
 
@@ -64,6 +65,42 @@ static void lcd_isr(void)
     LYC_REG = next > wave_bottom ? wave_bottom : next;
 }
 
+/* VBlank-driven "compiling" bar. The generator can sit inside one deep solve for
+ * a second or more, so anything drawn from the main loop would freeze; this runs
+ * from the interrupt instead. It fills from gen_cost (the generator's work counter;
+ * 16 cells x 128 is about GEN_BUDGET) and blinks a cursor at the end, so it always moves.
+ * Written straight to the window map: VRAM is free at the start of VBlank. */
+#define BUSY_W 16
+static volatile uint8_t busy_x, busy_row = 0xFF, busy_cells, busy_shine;
+
+void busy_start(uint8_t x, uint8_t row)
+{
+    busy_x = x;
+    busy_cells = 0;
+    busy_shine = 0;
+    busy_row = row;
+}
+
+void busy_stop(void)
+{
+    busy_row = 0xFF;
+}
+
+static void busy_tick(void)
+{
+    uint8_t *p = (uint8_t *)(0x9C00u + (uint16_t)busy_row * 32u + busy_x);
+    uint16_t c = gen_cost >> 7;             /* 128 units per cell: full at ~GEN_BUDGET */
+    uint8_t n = (uint8_t)(c > BUSY_W ? BUSY_W : c);
+    while (busy_cells < n) p[busy_cells++] = UI_BAR_FULL;   /* never shrinks */
+    if (busy_cells < BUSY_W) p[busy_cells] = (frame & 8) ? UI_BAR_HALF : TILE_BLANK;
+    /* a highlight runs along the filled part, so even a full bar keeps moving */
+    if (busy_cells > 1 && (frame & 3) == 0) {
+        if (busy_shine < busy_cells) p[busy_shine] = UI_BAR_FULL;
+        if (++busy_shine >= busy_cells) busy_shine = 0;
+        p[busy_shine] = UI_BAR_HALF;
+    }
+}
+
 static void vbl_isr(void)
 {
     frame++;
@@ -77,6 +114,7 @@ static void vbl_isr(void)
         set_bkg_palette(0, 8, pal_req == 1 ? white_pal : bg_pal);
         pal_req = 0;
     }
+    if (busy_row != 0xFF) busy_tick();
     sound_tick();       /* after the timing-sensitive register writes */
 }
 
