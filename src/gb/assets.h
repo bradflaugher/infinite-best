@@ -97,7 +97,7 @@ extern const uint8_t fade_tiles[NUM_FADE_TILES*16];
 /* ---- title logo (tiles load at TILE_MT_BASE; map holds ABSOLUTE indices) ---- */
 #define LOGO_W 20
 #define LOGO_H 7
-#define LOGO_NTILES 79
+#define LOGO_NTILES 75
 extern const uint8_t logo_tiles[LOGO_NTILES*16];
 extern const uint8_t logo_map[LOGO_W*LOGO_H];
 
