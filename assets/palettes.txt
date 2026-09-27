@@ -1,0 +1,29 @@
+# INFINITE BEST -- CGB palettes
+#
+#   @bgpal  <n> <NAME> <c0> <c1> <c2> <c3>
+#   @sprpal <n> <NAME> <c0> <c1> <c2> <c3>
+#
+# Colours are 24-bit #rrggbb; the generator converts to RGB555 (>>3).
+# c0 = background, c1 = dim, c2 = bright, c3 = hot highlight.
+# Every BG palette MUST share c0 (deep navy) so the screen is coherent.
+# Sprite c0 is transparent (value unused).
+
+# -- background palettes ---------------------------------------------------
+@bgpal 0 PAL_UI      #060818 #1a4870 #20c8f0 #d8ffff
+@bgpal 1 PAL_WALL    #060818 #1c2658 #4064b0 #a0c4f8
+@bgpal 2 PAL_CHIP    #060818 #106040 #40f070 #e0ffb0
+@bgpal 3 PAL_GATE_A  #060818 #581860 #f040c0 #ffc8f8
+@bgpal 4 PAL_AMBER   #060818 #684010 #f8b020 #fff0a0
+@bgpal 5 PAL_STOP    #060818 #682008 #f86820 #ffd0a0
+@bgpal 6 PAL_PORTAL  #060818 #381870 #9850f8 #e8c8ff
+@bgpal 7 PAL_PIT     #060818 #500818 #e82838 #ffa0a0
+
+# -- sprite palettes -------------------------------------------------------
+@sprpal 0 SPAL_PLAYER #000000 #1880c0 #50e8f8 #ffffff
+@sprpal 1 SPAL_SPARK  #000000 #c07010 #ffe040 #ffffff
+@sprpal 2 SPAL_HINT   #000000 #801870 #ff48d0 #ffe0ff
+@sprpal 3 SPAL_STAR   #000000 #a06000 #ffc020 #fff8c0
+@sprpal 4 SPAL_TRAIL  #000000 #103858 #2098d0 #80f0ff
+@sprpal 5 SPAL_DEAD   #000000 #700818 #f02840 #ffc0c0
+@sprpal 6 SPAL_CURSOR #000000 #107030 #40f070 #e0ffc0
+@sprpal 7 SPAL_WHITE  #000000 #506080 #a8b8d8 #ffffff
