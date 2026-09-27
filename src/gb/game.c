@@ -44,6 +44,12 @@ static uint8_t rewind_t;
 static uint8_t cur_song = 0xFF;
 static uint8_t exit_anim;
 static uint16_t seed_acc;
+static uint8_t rewinding;        /* B-hold rewind in progress (wave + detune on) */
+static uint8_t buf_dir = 0xFF;   /* direction pressed mid-slide, played on landing */
+#define BUF_REWIND 4
+static uint8_t msg_temp;         /* HUD message is transient: cleared by the next move */
+static uint8_t title_sel;        /* title cursor survives trips to codex / seed entry */
+static uint16_t record_at_start; /* RUN record before this run, for NEW RECORD! */
 
 static const char *const mech_name[NUM_MECH] = {
     "STOP PAD", "DATA CHIP", "NULL PIT", "ROUTER", "TOGGLE GATES", "PORTAL"
@@ -149,20 +155,21 @@ static void hud_msg(const char *s)
 {
     gfill(1, 4, 1, 16, 1, TILE_BLANK, PAL_UI);
     txt(1, 4, 1, s, PAL_UI);
+    msg_temp = 1;
 }
 
 static void hud_numbers(void)
 {
-    txt_num(1, 7, 0, level.par, 2, PAL_UI);
-    txt_num(1, 11, 0, run.moves > 99 ? 99 : run.moves, 2,
+    txt_num(1, 6, 0, level.par, 2, PAL_UI);
+    txt_num(1, 10, 0, run.moves > 99 ? 99 : run.moves, 2,
             run.moves > level.par ? PAL_AMBER : PAL_UI);
     if (run.mode == MODE_RUN) {
-        txt_num(1, 15, 0, run.energy, 2, run.energy <= 5 ? PAL_PIT : PAL_UI);
+        txt_num(1, 14, 0, run.energy, 2, run.energy <= 5 ? PAL_PIT : PAL_UI);
     } else {
-        put_tile(1, 15, 0, UI_INFINITY_L, PAL_HUD_ACCENT);
-        put_tile(1, 16, 0, UI_INFINITY_R, PAL_HUD_ACCENT);
+        put_tile(1, 14, 0, UI_INFINITY_L, PAL_HUD_ACCENT);
+        put_tile(1, 15, 0, UI_INFINITY_R, PAL_HUD_ACCENT);
     }
-    txt_num(1, 19, 0, run.streak > 9 ? 9 : run.streak, 1, PAL_UI);
+    txt_num(1, 18, 0, run.streak > 99 ? 99 : run.streak, 2, PAL_UI);
 }
 
 static void hud_chips(uint8_t chips)
@@ -170,7 +177,7 @@ static void hud_chips(uint8_t chips)
     uint8_t i;
     for (i = 0; i < 3; i++) {
         if (i < level.nchips)
-            put_tile(1, i, 1, (chips & (1u << i)) ? UI_CHIP : FONT_TILE('.'), PAL_CHIP);
+            put_tile(1, i, 1, (chips & (1u << i)) ? UI_CHIP : UI_CHIP_EMPTY, PAL_CHIP);
         else
             put_tile(1, i, 1, TILE_BLANK, PAL_UI);
     }
@@ -181,10 +188,10 @@ static void hud_draw(void)
     gfill(1, 0, 0, 20, 2, TILE_BLANK, PAL_UI);
     txt(1, 0, 0, "S", PAL_UI);
     txt_num(1, 1, 0, run.sector > 9999 ? 9999 : run.sector, 4, PAL_UI);
-    put_tile(1, 6, 0, UI_FLAG, PAL_HUD_ACCENT);
-    put_tile(1, 10, 0, UI_STEP, PAL_HUD_ACCENT);
-    put_tile(1, 14, 0, UI_BOLT, PAL_HUD_ACCENT);
-    put_tile(1, 18, 0, UI_STAR, PAL_HUD_ACCENT);
+    put_tile(1, 5, 0, UI_FLAG, PAL_HUD_ACCENT);
+    put_tile(1, 9, 0, UI_STEP, PAL_HUD_ACCENT);
+    put_tile(1, 13, 0, UI_BOLT, PAL_HUD_ACCENT);
+    put_tile(1, 17, 0, UI_STAR, PAL_HUD_ACCENT);
     hud_numbers();
     hud_chips(st.chips);
     move_win(7, HUD_WY);
@@ -284,6 +291,8 @@ static void start_level(void)
     else if (run.sector == 2) hud_msg("B: REWIND");
     else if (run.sector == 3 && level.featured == 0xFF) hud_msg("SELECT: HINT");
     else hud_msg("");
+    msg_temp = 0;       /* tutorial lines stay up until something replaces them */
+    buf_dir = 0xFF;
     game_state = GS_PLAY;
     if (level.featured != 0xFF) mech_intro();
     ps = PS_IDLE;
@@ -299,7 +308,10 @@ static void game_over(void)
     game_state = GS_OVER;
     ps = PS_IDLE;
     if (run.mode == MODE_RUN) {
-        if (reached > save.run_best_sector) { save.run_best_sector = reached; record = 1; }
+        /* win() already raises run_best_sector as you go, so compare against
+         * the record as it stood when this run began */
+        if (reached > save.run_best_sector) save.run_best_sector = reached;
+        record = (uint8_t)(reached > record_at_start);
         if (run.bests > save.run_best_bests) save.run_best_bests = run.bests;
         if (run.best_streak > save.run_best_streak) save.run_best_streak = run.best_streak;
     }
@@ -315,14 +327,14 @@ static void game_over(void)
     part_clear();
     move_win(7, 144);
     clear_bkg();
-    txt(0, 4, 2, "SIGNAL LOST", PAL_PIT);
+    txt(0, 4, 1, "SIGNAL LOST", PAL_PIT);
     txt(0, 3, 5, "SECTOR", PAL_UI);    txt_num(0, 13, 5, reached, 4, PAL_UI);
     txt(0, 3, 7, "CLEARED", PAL_UI);   txt_num(0, 13, 7, run.cleared, 4, PAL_UI);
     put_tile(0, 3, 9, UI_STAR, PAL_HUD_ACCENT);
     txt(0, 4, 9, "BESTS", PAL_UI);     txt_num(0, 13, 9, run.bests, 4, PAL_UI);
     txt(0, 3, 11, "STREAK", PAL_UI);   txt_num(0, 13, 11, run.best_streak, 4, PAL_UI);
     txt(0, 3, 13, "SEED", PAL_UI);     txt_hex(0, 13, 13, run.seed, PAL_CHIP);
-    txt(0, 3, 16, "RECORD SECTOR", PAL_UI); txt_num(0, 17, 16, save.run_best_sector, 3, PAL_AMBER);
+    txt(0, 3, 16, "RECORD", PAL_UI);   txt_num(0, 13, 16, save.run_best_sector, 4, PAL_AMBER);
     while (1) {
         tick();
         t++;
@@ -354,18 +366,20 @@ static void land_fx(void)
                5, SPR_PIXEL, SPAL_SPARK, 2);
 }
 
-static void try_move(uint8_t dir)
+static void try_move(uint8_t dir, uint8_t buffered)
 {
     uint8_t r;
     pending = st;
     r = sim_move(&level, &pending, dir, &path);
     if (r == MV_NONE) {
+        if (buffered) return;   /* mashing into the wall mid-slide: no buzz */
         sfx_play(SFX_ERROR);
         fx_shake(1);
         squash_t = 4;
         return;
     }
     hint_hide();
+    if (msg_temp) { hud_msg(""); msg_temp = 0; }
     hist_push(&st);
     run_on_move(&run);
     hud_numbers();
@@ -378,11 +392,11 @@ static void try_move(uint8_t dir)
     ps = PS_SLIDE;
 }
 
-static void rewind_one(void)
+static void rewind_one(uint8_t first)
 {
     if (!hist_pop(&st)) {
-        sfx_play(SFX_ERROR);
-        hud_msg("NO HISTORY");
+        /* complain once per press, not every repeat while B is held */
+        if (first) { sfx_play(SFX_ERROR); hud_msg("NO HISTORY"); }
         return;
     }
     anim_chips = st.chips;
@@ -421,6 +435,7 @@ static void death(void)
     player_show(SPR_PLAYER_IDLE);
     hud_chips(st.chips);
     sfx_play(SFX_REWIND);
+    buf_dir = 0xFF;     /* don't fire a move queued before the crash was visible */
     ps = PS_IDLE;
 }
 
@@ -465,10 +480,11 @@ static void win(void)
     txt(1, 12, 3, "PAR", PAL_UI);
     txt_num(1, 16, 3, level.par, 2, PAL_UI);
     if (run.mode == MODE_RUN) {
+        /* new total, then what this clear paid: "*27 +07" */
         put_tile(1, 2, 4, UI_BOLT, PAL_HUD_ACCENT);
-        txt(1, 3, 4, "+", PAL_CHIP);
-        txt_num(1, 4, 4, gain, 2, PAL_CHIP);
-        txt_num(1, 7, 4, run.energy, 2, PAL_UI);
+        txt_num(1, 3, 4, run.energy, 2, PAL_UI);
+        txt(1, 6, 4, "+", PAL_CHIP);
+        txt_num(1, 7, 4, gain, 2, PAL_CHIP);
     }
     put_tile(1, 12, 4, UI_STAR, PAL_HUD_ACCENT);
     txt(1, 13, 4, "X", PAL_UI);
@@ -483,7 +499,8 @@ static void win(void)
     txt(1, 2, 5, "SECTOR", PAL_UI);
     txt_num(1, 9, 5, run.sector, 4, PAL_AMBER);
     txt(1, 14, 5, "READY", PAL_CHIP);
-    for (t = 0; t < 50; t++) {
+    /* long enough to read the grade; A skips */
+    for (t = 0; t < 150; t++) {
         tick();
         if (t & 8) txt(1, 6, 6, "A: CONTINUE", PAL_UI);
         else gfill(1, 6, 6, 11, 1, TILE_BLANK, PAL_UI);
@@ -601,14 +618,15 @@ static uint8_t pause_menu(void)
 
     ps = PS_PAUSE;
     for (i = 0; i < 8; i++) hide_sprite(SP_PLAYER + i);   /* player, trail, hint */
+    part_clear();
     music_set_muffle(1);
     sfx_play(SFX_MENU);
     draw_box(1, 0, 0, 20, 8, PAL_UI);
     txt(1, 2, 0, " PAUSED ", PAL_AMBER);
     for (i = 0; i < 4; i++) txt(1, 4, (uint8_t)(1 + i), items[i], PAL_UI);
-    txt(1, 2, 6, "SEED", PAL_UI);
-    txt_hex(1, 7, 6, run.seed, PAL_CHIP);
-    txt(1, 12, 6, BUILD_DATE + 2, PAL_UI);
+    txt(1, 1, 6, "SEED", PAL_UI);          /* 18 chars fill the box interior */
+    txt_hex(1, 6, 6, run.seed, PAL_CHIP);
+    txt(1, 11, 6, BUILD_DATE + 2, PAL_WALL);
     move_win(7, 80);
     for (;;) {
         tick();
@@ -664,20 +682,37 @@ static void play(void)
                 if (level.cell[p] == T_EXIT) draw_cell(&level, p, anim_chips, anim_sw, exit_anim);
         }
         if (run.mode == MODE_RUN && run.energy <= 5 && (frame & 15) == 0)
-            put_tile(1, 14, 0, (frame & 16) ? UI_BOLT : TILE_BLANK, PAL_PIT);
+            put_tile(1, 13, 0, (frame & 16) ? UI_BOLT : TILE_BLANK, PAL_PIT);
 
+        /* a rewind starts only on a fresh B press, so a B held over from a
+         * banner or a slide doesn't silently rewind without the wave/detune */
+        if (rewinding && !(keys & J_B)) {
+            rewinding = 0;
+            fx_wave(0);
+            music_set_rewind(0);
+        }
         switch (ps) {
         case PS_IDLE:
-            if (keys & J_B) {
-                if (pressed & J_B) { rewind_t = 0; fx_wave(1); music_set_rewind(1); rewind_one(); }
-                else if (++rewind_t >= 10) { rewind_t = 0; rewind_one(); }
-            } else if (prev_keys & J_B) {
-                fx_wave(0);
-                music_set_rewind(0);
-            } else if (pressed & J_UP) try_move(DIR_U);
-            else if (pressed & J_RIGHT) try_move(DIR_R);
-            else if (pressed & J_DOWN) try_move(DIR_D);
-            else if (pressed & J_LEFT) try_move(DIR_L);
+            if (buf_dir == BUF_REWIND) {         /* B went down mid-slide */
+                buf_dir = 0xFF;
+                if (keys & J_B) pressed |= J_B;
+            }
+            if (buf_dir <= 3) {
+                /* a direction tapped mid-slide plays as soon as we land */
+                sel = buf_dir;
+                buf_dir = 0xFF;
+                if (!(keys & J_B)) try_move(sel, 1);
+            } else if (pressed & J_B) {
+                buf_dir = 0xFF;
+                rewinding = 1; rewind_t = 0;
+                fx_wave(1); music_set_rewind(1);
+                rewind_one(1);
+            } else if (rewinding) {
+                if (++rewind_t >= 10) { rewind_t = 0; rewind_one(0); }
+            } else if (pressed & J_UP) try_move(DIR_U, 0);
+            else if (pressed & J_RIGHT) try_move(DIR_R, 0);
+            else if (pressed & J_DOWN) try_move(DIR_D, 0);
+            else if (pressed & J_LEFT) try_move(DIR_L, 0);
             else if (pressed & J_SELECT) do_hint();
             else if (pressed & J_START) {
                 sel = pause_menu();
@@ -721,6 +756,11 @@ static void play(void)
             }
             break;
         case PS_SLIDE:
+            if (pressed & J_B) buf_dir = BUF_REWIND;
+            else if (pressed & J_UP) buf_dir = DIR_U;
+            else if (pressed & J_RIGHT) buf_dir = DIR_R;
+            else if (pressed & J_DOWN) buf_dir = DIR_D;
+            else if (pressed & J_LEFT) buf_dir = DIR_L;
             slide_update();
             player_frame = SPR_PLAYER_IDLE;
             break;
@@ -734,6 +774,7 @@ static void play(void)
     }
     fx_wave(0);
     music_set_rewind(0);
+    rewinding = 0;
 }
 
 /* ---------------------------------------------------------------- title & codex */
@@ -745,6 +786,7 @@ static void codex(void)
     game_state = GS_CODEX;
     gfx_load_game_tiles();
     gfx_hide_all_sprites();
+    part_clear();       /* title sparkles would otherwise keep flying over the text */
     move_win(7, 144);
     for (;;) {
         clear_bkg();
@@ -764,6 +806,7 @@ static void codex(void)
             txt(0, 1, 17, "RIGHT: TILES", PAL_UI);
         } else {
             txt(0, 1, 0, "CODEX", PAL_AMBER);
+            txt(0, 13, 0, "< RULES", PAL_WALL);
             put_mt(0, 0, 2, MT_WALL);   txt(0, 3, 2, "WALL", PAL_UI);   txt(0, 3, 3, "STOPS YOU", PAL_UI);
             put_mt(0, 0, 4, MT_EXIT_OPEN); txt(0, 3, 4, "EXIT", PAL_UI); txt(0, 3, 5, "CATCHES YOU", PAL_UI);
             for (m = 0; m < NUM_MECH; m++) {
@@ -774,10 +817,10 @@ static void codex(void)
                     txt(0, 3, y, mech_name[m], PAL_AMBER);
                     txt(0, 3, (uint8_t)(y + 1), mech_desc[m], PAL_UI);
                 } else {
-                    txt(0, 0, y, "??", PAL_UI);
+                    txt(0, 0, y, "??", PAL_WALL);
                     txt(0, 3, y, "UNDISCOVERED", PAL_UI);
-                    txt(0, 3, (uint8_t)(y + 1), "SECTOR", PAL_UI);
-                    txt_num(0, 10, (uint8_t)(y + 1), mech_unlock_at[m], 2, PAL_UI);
+                    txt(0, 3, (uint8_t)(y + 1), "SECTOR", PAL_WALL);
+                    txt_num(0, 10, (uint8_t)(y + 1), mech_unlock_at[m], 2, PAL_WALL);
                 }
             }
         }
@@ -792,7 +835,7 @@ static void codex(void)
 static uint8_t title(void)
 {
     static const char *const items[4] = { "RUN", "ZEN", "SEED", "CODEX" };
-    uint8_t sel = 0, t = 0, i;
+    uint8_t sel = title_sel, t = 0, i;
 
     game_state = GS_TITLE;
     ps = PS_IDLE;
@@ -832,6 +875,7 @@ static uint8_t title(void)
     wave_top = 0;
     wave_bottom = HUD_WY;
     hide_sprite(SP_CURSOR);
+    title_sel = sel;
     return sel;
 }
 
@@ -840,7 +884,7 @@ static uint8_t title(void)
 static uint16_t seed_entry(void)
 {
     static const char hex[] = "0123456789ABCDEF";
-    uint8_t dig[4], cur = 0, i, redraw = 1;
+    uint8_t dig[4], cur = 0, i, bob, redraw = 1;
     uint16_t v = run.seed ? run.seed : 0x1D0B;
     char c[2];
     game_state = GS_CODEX;
@@ -859,12 +903,19 @@ static uint16_t seed_entry(void)
             for (i = 0; i < 4; i++) {
                 c[0] = hex[dig[i]];
                 txt(0, (uint8_t)(6 + i * 2), 7, c, i == cur ? PAL_AMBER : PAL_UI);
-                put_tile(0, (uint8_t)(6 + i * 2), 6, i == cur ? FONT_TILE('^') : TILE_BLANK, PAL_AMBER);
-                put_tile(0, (uint8_t)(6 + i * 2), 8, i == cur ? FONT_TILE('^') : TILE_BLANK, PAL_AMBER);
             }
             redraw = 0;
         }
         tick();
+        /* up / down arrows (sprites, so the lower one can flip) on the digit */
+        i = (uint8_t)(8 + 48 + cur * 16);
+        bob = (uint8_t)((frame >> 4) & 1);
+        set_sprite_tile(SP_MISC, SPR_HINT_UP);
+        set_sprite_prop(SP_MISC, SPAL_STAR);
+        move_sprite(SP_MISC, i, (uint8_t)(16 + 47 - bob));
+        set_sprite_tile(SP_MISC + 1, SPR_HINT_UP);
+        set_sprite_prop(SP_MISC + 1, SPAL_STAR | S_FLIPY);
+        move_sprite(SP_MISC + 1, i, (uint8_t)(16 + 64 + bob));
         if (pressed & J_LEFT) { cur = (uint8_t)((cur + 3) & 3); redraw = 1; sfx_play(SFX_MENU); }
         if (pressed & J_RIGHT) { cur = (uint8_t)((cur + 1) & 3); redraw = 1; sfx_play(SFX_MENU); }
         if (pressed & J_UP) { dig[cur] = (uint8_t)((dig[cur] + 1) & 15); redraw = 1; sfx_play(SFX_MENU); }
@@ -885,8 +936,8 @@ static void loading_screen(void)
     gfx_hide_all_sprites();
     part_clear();
     clear_bkg();
+    clear_win();        /* before showing it: the window still holds the last HUD/menu */
     move_win(7, 56);
-    clear_win();
     txt(1, 2, 2, "BOOTING SECTOR", PAL_UI);
     txt_num(1, 2, 3, run.sector, 4, PAL_AMBER);
     txt(1, 7, 3, run.mode == MODE_RUN ? "RUN MODE" : "ZEN MODE", PAL_CHIP);
@@ -923,6 +974,7 @@ void game_main(void) BANKED
             }
             run_start(&run, MODE_ZEN, save.zen_seed, save.zen_sector);
         }
+        record_at_start = save.run_best_sector;
         cur_song = 0xFF;
         music_stop();
         loading_screen();

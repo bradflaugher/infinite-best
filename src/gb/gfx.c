@@ -20,6 +20,7 @@ int8_t shake_x, shake_y;
 
 static uint8_t shake_amt;
 static uint8_t flash_t;
+static volatile uint8_t pal_req;    /* CGB: 1 = flash white, 2 = restore; applied in VBlank */
 static volatile uint8_t wave_mode;
 static volatile uint8_t wave_phase;
 static volatile uint8_t wave_base;
@@ -70,6 +71,12 @@ static void vbl_isr(void)
     SCX_REG = (uint8_t)shake_x;
     SCY_REG = (uint8_t)shake_y;
     wave_phase++;
+    /* CGB palette RAM can't be written while the LCD is drawing, so flashes
+     * are posted here instead of written from the main loop mid-frame */
+    if (pal_req) {
+        set_bkg_palette(0, 8, pal_req == 1 ? white_pal : bg_pal);
+        pal_req = 0;
+    }
     sound_tick();       /* after the timing-sensitive register writes */
 }
 
@@ -327,7 +334,7 @@ void fx_shake(uint8_t amount)
 void fx_flash(uint8_t frames)
 {
     flash_t = frames;
-    if (is_cgb) set_bkg_palette(0, 8, white_pal);
+    if (is_cgb) pal_req = 1;
     else BGP_REG = 0x00;
 }
 
@@ -356,7 +363,7 @@ void fx_update(void)
     if (flash_t) {
         flash_t--;
         if (!flash_t) {
-            if (is_cgb) set_bkg_palette(0, 8, bg_pal);
+            if (is_cgb) pal_req = 2;
             else BGP_REG = 0x1B;
         } else if (!is_cgb) {
             BGP_REG = (flash_t & 2) ? 0x00 : 0x6F;
