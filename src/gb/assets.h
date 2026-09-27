@@ -37,7 +37,7 @@ enum {
     UI_BOX_BR = TILE_UI_BASE + 10,
     UI_BAR_FULL = TILE_UI_BASE + 11,
     UI_BAR_HALF = TILE_UI_BASE + 12,
-    UI_BAR_EMPTY = TILE_UI_BASE + 13,
+    UI_CHIP_EMPTY = TILE_UI_BASE + 13,
     UI_INFINITY_L = TILE_UI_BASE + 14,
     UI_INFINITY_R = TILE_UI_BASE + 15
 };
@@ -97,7 +97,7 @@ extern const uint8_t fade_tiles[NUM_FADE_TILES*16];
 /* ---- title logo (tiles load at TILE_MT_BASE; map holds ABSOLUTE indices) ---- */
 #define LOGO_W 20
 #define LOGO_H 7
-#define LOGO_NTILES 79
+#define LOGO_NTILES 75
 extern const uint8_t logo_tiles[LOGO_NTILES*16];
 extern const uint8_t logo_map[LOGO_W*LOGO_H];
 

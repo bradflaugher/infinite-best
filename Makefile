@@ -9,6 +9,7 @@ BUILD_DATE ?= $(shell date -u +%Y.%m.%d)
 
 CORE_SRC  := $(wildcard src/core/*.c)
 GB_SRC    := $(wildcard src/gb/*.c)
+ASSET_SRC := $(wildcard assets/*.txt) tools/gen_assets.py
 HOST_CFLAGS := -std=c99 -O2 -Wall -Wextra -Werror
 
 # MBC5 + RAM + battery (0x1B), 1 SRAM bank, CGB-compatible, autobanked ROM
@@ -24,7 +25,7 @@ assets:
 
 rom: $(ROM)
 
-$(ROM): $(CORE_SRC) $(GB_SRC) $(wildcard src/core/*.h src/gb/*.h) | $(BUILD)
+$(ROM): $(CORE_SRC) $(GB_SRC) $(wildcard src/core/*.h src/gb/*.h) $(ASSET_SRC) | $(BUILD)
 	$(PYTHON) tools/gen_assets.py
 	echo '#define BUILD_DATE "$(BUILD_DATE)"' > $(BUILD)/version.h
 	$(LCC) $(LCCFLAGS) -o $@ $(CORE_SRC) $(GB_SRC)

@@ -7,6 +7,7 @@ clear them on-device.
 
 Run: make test-rom   (needs `pip install pyboy`)
 """
+import io
 import os
 import subprocess
 import unittest
@@ -25,6 +26,9 @@ GN = 120
 LEVEL_PAR = GN + 1 + 1 + 3 + 2       # offset of Level.par
 RUN_SECTOR, RUN_ENERGY, RUN_STREAK, RUN_MOVES = 3, 5, 6, 12
 DIRS = {'U': 'up', 'R': 'right', 'D': 'down', 'L': 'left'}
+SRAM_SIZE = 8192
+SAVE_SLOTS = (0xA000, 0xA020)   # primary + backup copy of SaveData
+SAVE_BEST_SECTOR = 3            # offset of SaveData.run_best_sector
 
 
 def ibgen(*args):
@@ -32,8 +36,10 @@ def ibgen(*args):
 
 
 class Game:
-    def __init__(self, cgb):
-        self.pb = PyBoy(ROM, window='null', cgb=cgb, symbols=SYM, sound_emulated=False)
+    def __init__(self, cgb, sram=None):
+        # always pass a RAM file so a stray build/*.gb.ram never leaks into a test
+        ram = io.BytesIO(sram if sram is not None else bytes(SRAM_SIZE))
+        self.pb = PyBoy(ROM, window='null', cgb=cgb, symbols=SYM, sound_emulated=False, ram_file=ram)
         self.pb.set_emulation_speed(0)
         self.tag = 'cgb' if cgb else 'dmg'
 
@@ -79,14 +85,21 @@ class Game:
         os.makedirs(SHOTS, exist_ok=True)
         self.pb.screen.image.save(os.path.join(SHOTS, f'{self.tag}_{name}.png'))
 
-    def screen_text(self):
+    def screen_text(self, base=0x9800):
         """Decode the BG map (font tiles are ASCII-32) to find on-screen strings."""
         m = self.pb.memory
         rows = []
         for y in range(18):
-            rows.append(''.join(chr(m[0x9800 + y * 32 + x] + 32) if m[0x9800 + y * 32 + x] < 64 else ' '
+            rows.append(''.join(chr(m[base + y * 32 + x] + 32) if m[base + y * 32 + x] < 64 else ' '
                                 for x in range(20)))
         return '\n'.join(rows)
+
+    def win_text(self):
+        """Same for the window map (HUD, banners, pause box)."""
+        return self.screen_text(0x9C00)
+
+    def win_tile(self, x, y):
+        return self.pb.memory[0x9C00 + y * 32 + x]
 
     def start_run(self, seed):
         assert self.wait(lambda: self.u8('game_state') == GS_TITLE)
@@ -127,6 +140,28 @@ class Game:
         assert self.wait(lambda: self.u8('game_state') == GS_GEN or self.ps_in(PS_WIN), 600)
         self.wait(lambda: self.u8('game_state') == GS_PLAY and self.u8('ps') != PS_WIN, 4000)
         self.skip_intro()
+
+    def sram(self):
+        return bytes(self.pb.memory[0, 0xA000 + i] for i in range(SRAM_SIZE))
+
+    def win_text(self, rows=8):
+        """Decode the window map (the HUD / banners live there)."""
+        m = self.pb.memory
+        return '\n'.join(''.join(chr(m[0x9C00 + y * 32 + x] + 32) if m[0x9C00 + y * 32 + x] < 64 else ' '
+                                 for x in range(20)) for y in range(rows))
+
+    def hint_visible(self, frames=40):
+        """True if the hint arrow sprite shows up within `frames` (it blinks)."""
+        for _ in range(frames):
+            self.run(1)
+            if 0 < self.pb.memory[0xFE00 + 7 * 4] < 160:
+                return True
+        return False
+
+    def abandon(self):
+        self.press('start', after=10)
+        self.press('up')                  # wraps to ABANDON
+        self.press('a', after=10)
 
     def stop(self):
         self.pb.stop(save=False)
@@ -178,6 +213,8 @@ class RomTest(unittest.TestCase):
             g.continue_after_win()
             # optimal play keeps the BEST streak alive and never loses energy
             self.assertEqual(g.u8('run', RUN_STREAK), sector)
+            # the HUD shows the whole streak (it used to clamp to one digit)
+            self.assertEqual(g.win_text().split('\n')[0][18:20], '%02d' % sector)
         g.shot('sector7')
 
     def test_rewind_restores_state(self):
@@ -217,10 +254,54 @@ class RomTest(unittest.TestCase):
         g.press('start', after=10)
         self.assertEqual(g.u8('ps'), PS_PAUSE)
         g.shot('pause')
+        # seed + build date fit inside the box: its right edge is intact
+        box_r = g.win_tile(19, 1)
+        for y in range(1, 7):
+            self.assertEqual(g.win_tile(19, y), box_r, f'pause box edge broken at row {y}')
         g.press('down')
         g.press('a', after=10)
         self.assertTrue(g.wait(g.ready, 300))
         self.assertEqual(g.u8('st'), start)
+
+    def test_move_buffered_during_slide(self):
+        """A direction tapped while still sliding plays when the slide lands."""
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        _, moves = ibgen('solve', seed, 1)
+        g.pb.button_press(DIRS[moves[0]]); g.run(2); g.pb.button_release(DIRS[moves[0]])
+        g.run(2)
+        self.assertEqual(g.u8('ps'), PS_SLIDE)
+        g.press(DIRS[moves[1]], hold=2, after=1)
+        self.assertTrue(g.wait(lambda: g.u8('run', RUN_MOVES) == 2, 400))
+        g.run(2)
+        self.assertTrue(g.wait(g.ready, 400))
+        for d in moves[2:]:
+            g.wait(g.ready, 600)
+            g.move(d)
+        self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_GEN or g.ps_in(PS_WIN), 600))
+        self.assertEqual(g.u16('run', RUN_SECTOR), 2)
+
+    def test_hold_b_without_history(self):
+        """Holding B on a fresh sector complains once and stops the wave on release."""
+        g = self.g
+        g.start_run(0x0042)
+        g.pb.button_press('b')
+        g.run(8)
+        self.assertIn('NO HISTORY', g.win_text())
+        g.run(60)
+        g.pb.button_release('b')
+        g.run(3)
+        self.assertTrue(g.ready())
+        # moves still work right after
+        start = g.u8('st')
+        for d in 'RDLU':
+            g.move(d)
+            if g.u8('st') != start:
+                break
+        self.assertNotEqual(g.u8('st'), start)
+        # and the "NO HISTORY" line is gone once you move
+        self.assertNotIn('NO HISTORY', g.win_text())
 
     def test_energy_runs_out(self):
         g = self.g
@@ -239,6 +320,8 @@ class RomTest(unittest.TestCase):
                         g.continue_after_win()
         self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_OVER, 600))
         self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 600))
+        # first run on a fresh save always beats the record
+        self.assertTrue(g.wait(lambda: 'NEW RECORD!' in g.screen_text(), 120))
         g.run(70)
         g.shot('gameover')
         g.press('a', after=10)
@@ -279,6 +362,78 @@ class RomTest(unittest.TestCase):
         g.shot('codex')
         g.press('b', after=20)
         self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_TITLE, 200))
+
+
+    def test_new_record_and_save_survives_reboot(self):
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        for _ in range(2):
+            g.solve_current(seed)
+            g.continue_after_win()
+        g.abandon()
+        self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 900))
+        # the record was already raised by the clears; the banner must still show
+        self.assertTrue(g.wait(lambda: 'NEW RECORD' in g.screen_text(), 120))
+        self.assertIn('RECORD    0003', g.screen_text())
+        sram = g.sram()
+        g.stop()
+
+        def title_record(ram):
+            self.g = Game(self.CGB, ram)
+            self.assertTrue(self.g.wait(lambda: self.g.u8('game_state') == GS_TITLE, 600))
+            self.g.run(30)
+            return self.g.screen_text().splitlines()[17]
+
+        self.assertIn('RECORD 0003', title_record(sram))
+        # a torn write that damages the primary copy falls back to the backup
+        bad = bytearray(sram)
+        bad[SAVE_SLOTS[0] - 0xA000 + SAVE_BEST_SECTOR] ^= 0x5A
+        self.assertIn('RECORD 0003', title_record(bytes(bad)))
+        self.assertEqual(self.g.sram()[:0x20], sram[:0x20], 'primary copy repaired')
+        self.g.stop()
+        # a new run from the same save that does not beat 3 is not a record
+        self.g = g = Game(self.CGB, sram)
+        g.start_run(seed)
+        g.abandon()
+        self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 900))
+        self.assertFalse(g.wait(lambda: 'NEW RECORD' in g.screen_text(), 120))
+
+    def test_restart_clears_hint_and_banner_clamps(self):
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        start = g.u8('st')
+        _, sol = ibgen('solve', seed, 1)
+        hinted = False
+        for d in 'RDLU':
+            if d == sol[0]:
+                continue
+            g.move(d)
+            g.wait(g.ready, 300)
+            if g.u8('st') == start:
+                continue
+            g.press('select', after=5)
+            if g.hint_visible():
+                hinted = True
+                break
+            g.press('b', hold=3, after=20)
+            g.wait(g.ready, 300)
+        self.assertTrue(hinted)
+        g.press('start', after=10)
+        g.press('down')
+        g.press('a', after=10)            # RESTART
+        self.assertTrue(g.wait(g.ready, 300))
+        self.assertEqual(g.u8('st'), start)
+        self.assertFalse(g.hint_visible(), 'stale hint arrow after restart')
+        # 100+ moves: the clear banner saturates at 99 like the HUD does
+        for i, d in enumerate(sol):
+            g.wait(g.ready, 600)
+            if i == len(sol) - 1:
+                g.pb.memory[g.addr('run') + RUN_MOVES] = 150
+            g.move(d)
+        self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_GEN, 600))
+        self.assertIn('MOVES 99', g.win_text())
 
 
 class RomTestCGB(RomTest):

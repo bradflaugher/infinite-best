@@ -13,7 +13,7 @@ Jonathan Blow school of design:
 
 1. **Rules, not text.** Every mechanic is introduced alone, on its own sector, with a
    one-line label. What it *means* you learn by playing. (The Witness)
-2. **Time is a toy.** Hold **B** to rewind. Rewinding is free and unlimited, but the
+2. **Time is a toy.** Hold **B** to rewind. Rewinding is free (up to 256 moves back), but the
    world remembers: your move counter and your energy never flow backwards. Rewind is
    for understanding, not for cheating par. (Braid)
 3. **No wasted minutes.** Levels are small (10×8), a sector takes 20 s to 3 min, the
@@ -38,7 +38,7 @@ shorter "breather". Par targets climb from ~3 to ~10 moves.
 
 ## Modes
 
-- **RUN** (the roguelike). You start with 24 energy, and each move costs 1. Clearing a sector refunds its par,
+- **RUN** (the roguelike). You start with 30 energy, and each move costs 1. Clearing a sector refunds its par,
   and a BEST also pays +2 plus a streak bonus. Hints cost 3. Hitting zero ends the run.
   An optimal player gains energy every sector, so the run ends when *you* slip.
   Each run has a seed (shown on pause / game over).
@@ -54,7 +54,12 @@ state space (position × collected chips × switch state, at most 1280 states).
 
 - Candidates whose par falls outside the sector's difficulty window are rejected.
 - On a teaching sector, the new mechanic must *matter*. The generator strips it out
-  and re-solves, and the level is rejected if the par doesn't change.
+  and re-solves, and the level is rejected if the par doesn't change. Teaching sectors
+  get 96 attempts instead of 48, so this holds on every seed.
+- Until sector 22, the sectors between lessons keep the newest mechanic on and ask it to
+  matter too (for the first 12 attempts, which bounds the extra solving). Without this,
+  the stop pads, routers, gates and portals were decoration on 40-80% of those boards.
+  Pits and routers, which rarely matter by chance, get one extra tile when they are the focus.
 - If nothing fits after 48 attempts, the closest solvable candidate is used. A hand-made
   fallback guarantees the game can never soft-lock.
 
@@ -66,7 +71,7 @@ the Game Boy, and CI checks this byte-for-byte.
 The BFS inner loop, one slide across the board, is hand-written SM83 assembly
 (`fast_move` in `solver.c`). The portable C version next to it is the reference. The grid is
 stored with a wall border (12×10) so the slide needs no bounds checks, divisions or
-multiplications. A typical sector generates in ~0.5 s on an original Game Boy and ~0.25 s
+multiplications. A typical sector generates in ~0.3–1 s on an original Game Boy and about half that
 in Game Boy Color double-speed mode. The time is hidden behind the clear banner.
 
 ## Juice

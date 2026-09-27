@@ -323,6 +323,70 @@ static void test_teaching_levels(void)
     CHECK_EQ(gen_new_mech(2), 0xFF);
 }
 
+/* par of L with every tile of mechanic m turned into floor */
+static uint8_t par_without(const Level *src, uint8_t m)
+{
+    Level d = *src;
+    State s;
+    uint8_t i, t, strip;
+    for (i = 0; i < GN; i++) {
+        t = d.cell[i];
+        switch (m) {
+        case M_STOP: strip = (uint8_t)(t == T_STOP); break;
+        case M_PIT: strip = (uint8_t)(t == T_PIT); break;
+        case M_ARROW: strip = (uint8_t)(t >= T_ARROW_U && t <= T_ARROW_L); break;
+        case M_GATE: strip = (uint8_t)(t == T_SWITCH || t == T_GATE_A || t == T_GATE_B); break;
+        case M_PORTAL: strip = (uint8_t)(t == T_PORTAL); break;
+        default: strip = 0; break;
+        }
+        if (strip) d.cell[i] = T_FLOOR;
+    }
+    if (m == M_PORTAL) { d.portal[0] = NO_POS; d.portal[1] = NO_POS; }
+    state_start(&d, &s);
+    return solve(&d, &s);
+}
+
+/* The newest mechanic has to change the solution: always on its teaching
+ * sector, and usually on the reinforcement sectors that follow it. */
+static void test_mechanics_matter(void)
+{
+    static const uint16_t reinforce[] = { 4, 12, 13, 15, 16, 19, 20 };
+    static const uint8_t reinforce_m[] = { M_STOP, M_ARROW, M_ARROW, M_GATE, M_GATE, M_PORTAL, M_PORTAL };
+    GenParams p;
+    Level L;
+    uint16_t seed;
+    uint8_t m, i;
+    int matter, total = 0;
+
+    for (m = 0; m < NUM_MECH; m++) {
+        rng_seed(1); gen_params(mech_unlock[m], &p);
+        CHECK_EQ(p.focus, m);
+        if (m == M_CHIP) continue;
+        for (seed = 1; seed <= 40; seed++) {
+            gen_level(&L, (uint16_t)(seed * 977u), mech_unlock[m], 0);
+            CHECK(par_without(&L, m) != L.par);
+            CHECK(L.par >= 2);
+        }
+    }
+    for (i = 0; i < sizeof reinforce / sizeof reinforce[0]; i++) {
+        rng_seed(5); gen_params(reinforce[i], &p);
+        CHECK_EQ(p.focus, reinforce_m[i]);
+        CHECK(p.mechs & MBIT(reinforce_m[i]));
+        matter = 0;
+        for (seed = 1; seed <= 40; seed++) {
+            gen_level(&L, (uint16_t)(seed * 977u), reinforce[i], 0);
+            matter += par_without(&L, reinforce_m[i]) != L.par;
+        }
+        CHECK(matter >= 22);
+        total += matter;
+    }
+    CHECK(total >= 200);   /* of 280; about 120 before the focus rule */
+    rng_seed(1); gen_params(FREEFORM_SECTOR + 1, &p);
+    CHECK_EQ(p.focus, 0xFF);
+    rng_seed(1); gen_params(1, &p);
+    CHECK_EQ(p.focus, 0xFF);
+}
+
 static void test_difficulty_curve(void)
 {
     GenParams p1, p50;
@@ -403,6 +467,7 @@ int main(void)
     test_grid_padding();
     test_generator_determinism();
     test_teaching_levels();
+    test_mechanics_matter();
     test_difficulty_curve();
     test_run_economy();
     printf("core: %d passed, %d failed\n", passed, failed);
