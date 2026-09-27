@@ -32,7 +32,7 @@ under a second, and the game saves after every clear. It aims to be thinky witho
   one-line label. The generator checks that the new idea actually matters: it strips the
   mechanic out, re-solves, and rejects the level if the par doesn't change. The sectors that
   follow keep asking the newest idea to matter, so it doesn't fade into decoration. *(After The Witness.)*
-- **Rewind is free; time is not.** Hold **B** to rewind as far as you like. The screen ripples
+- **Rewind is free; time is not.** Hold **B** to rewind up to 256 moves back. The screen ripples
   and the music detunes. But your move counter and energy only go forward, so rewinding helps
   you understand the puzzle but can't earn you par. *(After Braid.)*
 - **A roguelike you can put down.** RUN mode is a fresh seeded run where every move costs energy
@@ -64,7 +64,7 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 | Button | Action |
 | --- | --- |
 | D-pad | Slide |
-| **B** (hold) | Rewind, free and unlimited (energy already spent stays spent) |
+| **B** (hold) | Rewind, free, up to 256 moves back (energy already spent stays spent) |
 | **SELECT** | Hint: the optimal next move and how many moves remain (costs 3 energy in RUN) |
 | **START** | Pause: resume · restart · hint/skip · quit |
 
@@ -110,7 +110,7 @@ CGB-enhanced: colour and double speed on Color hardware, fully playable on an or
   can never soft-lock.
 - **Speed.** The slide inside the BFS is hand-written assembly over a wall-padded 12×10 grid,
   so it needs no bounds checks, multiplies or divides. It is about 10× faster than the
-  compiler's version. A sector generates in ~0.5 s on a DMG and ~0.25 s on a Color, hidden
+  compiler's version. A sector generates in ~0.3–1 s on a DMG and about half that on a Color, hidden
   behind the clear banner.
 - **Determinism.** Everything is fixed-width integer maths on a 16-bit xorshift, so the Game Boy
   and a PC generate *byte-identical* sectors, and CI checks this.

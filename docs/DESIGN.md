@@ -13,7 +13,7 @@ Jonathan Blow school of design:
 
 1. **Rules, not text.** Every mechanic is introduced alone, on its own sector, with a
    one-line label. What it *means* you learn by playing. (The Witness)
-2. **Time is a toy.** Hold **B** to rewind. Rewinding is free and unlimited, but the
+2. **Time is a toy.** Hold **B** to rewind. Rewinding is free (up to 256 moves back), but the
    world remembers: your move counter and your energy never flow backwards. Rewind is
    for understanding, not for cheating par. (Braid)
 3. **No wasted minutes.** Levels are small (10×8), a sector takes 20 s to 3 min, the
@@ -71,7 +71,7 @@ the Game Boy, and CI checks this byte-for-byte.
 The BFS inner loop, one slide across the board, is hand-written SM83 assembly
 (`fast_move` in `solver.c`). The portable C version next to it is the reference. The grid is
 stored with a wall border (12×10) so the slide needs no bounds checks, divisions or
-multiplications. A typical sector generates in ~0.5 s on an original Game Boy and ~0.25 s
+multiplications. A typical sector generates in ~0.3–1 s on an original Game Boy and about half that
 in Game Boy Color double-speed mode. The time is hidden behind the clear banner.
 
 ## Juice

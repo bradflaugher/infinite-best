@@ -11,7 +11,7 @@ from test_rom import Game, GS_GEN, GS_OVER, GS_TITLE, PS_INTRO, RUN_SECTOR, DIRS
 
 OUT = os.path.join(ROOT, 'docs', 'screens')
 SCALE = 3
-SEED = 0x5EED
+SEED = 0xB357
 
 
 def frame(g, scale=SCALE):
