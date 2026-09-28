@@ -16,9 +16,9 @@ It works on original grey Game Boys and runs in full colour and double speed on 
 ## 2. Prepare the SD card (first time only)
 
 1. Format a microSD card as **FAT32**. For cards over 32 GB, use a tool that can force FAT32, such as "Rufus" on Windows or `mkfs.vfat -F 32` on Linux. On macOS, use Disk Utility and choose "MS-DOS (FAT)".
-2. The EverDrive needs its OS folder, **`GBSYS`**, in the root of the card.
+2. The EverDrive needs its OS folder, **`GBCSYS`**, in the root of the card.
    - If your card came with the EverDrive, it probably already has it.
-   - If not, download the latest OS for your model from krikzz.com (look for the "OS" / "firmware" zip for EverDrive GB X-series) and copy the `GBSYS` folder to the root of the card.
+   - If not, download the latest OS for your model from krikzz.com (look for the "OS" / "firmware" zip for EverDrive GB X-series) and copy the `GBCSYS` folder to the root of the card. The current X-series OS is v1.06; the zip contains `GBCSYS/GBCOS.BIN`.
 
 ## 3. Copy the game
 
@@ -28,7 +28,8 @@ It works on original grey Game Boys and runs in full colour and double speed on 
 
 ```
 SD card
-├── GBSYS/            <- EverDrive OS (don't touch)
+├── GBCSYS/           <- EverDrive OS (don't touch)
+│   └── GBCOS.BIN
 └── GB/
     └── Infinite Best.gb
 ```
@@ -42,7 +43,7 @@ SD card
 
 ## 5. Saves
 
-The game keeps its records and your Zen progress in battery-backed save RAM. The EverDrive stores this as a `.sav` file on the SD card, in the `GBSYS` save folder next to the OS files.
+The game keeps its records and your Zen progress in battery-backed save RAM. The EverDrive copies that RAM to `GBCSYS/SAVE/` as a `.srm` file whose name matches the ROM (`Infinite Best.srm`). Cart save states, from the in-game menu, go in `GBCSYS/SNAP/` and are not the game's own progress.
 
 - Progress is written the moment you clear a sector, so you can just switch off the handheld.
 - EverDrive models differ in *when* they copy save RAM to the SD card:
@@ -50,11 +51,11 @@ The game keeps its records and your Zen progress in battery-backed save RAM. The
   - Some write it on the next power-on, before the menu appears.
 
   If a record ever seems to vanish, do this: after playing, power-cycle the handheld once and let the EverDrive menu load before removing the SD card. For details, see your cart's manual on krikzz.com.
-- To wipe your progress, delete `Infinite Best.sav` from the card.
+- To wipe your progress, delete `GBCSYS/SAVE/Infinite Best.srm` from the card.
 
 ## Updating
 
-When a new build comes out, the release tag changes to the new date. Download the new `.gb` file and copy it over the old one. Keep the file name the same so it keeps using your existing `.sav`.
+When a new build comes out, the release tag changes to the new date. Download the new `.gb` file and copy it over the old one. Keep the file name the same so it keeps using your existing `.srm`.
 
 ## Emulators
 
@@ -64,7 +65,7 @@ Any good emulator works, including SameBoy, Gambatte, mGBA, BGB, Emulicious and 
 
 | Symptom | Fix |
 | --- | --- |
-| EverDrive says "file not found" / no menu | `GBSYS` is missing or the card isn't FAT32. |
+| EverDrive says "file not found" / no menu | `GBCSYS` is missing or the card isn't FAT32. |
 | Garbled graphics on boot | Re-seat the cartridge and clean the contacts. Make sure the EverDrive OS is current. |
 | Game is grey on a Color handheld | That happens if the handheld is forcing DMG mode. Normally the game picks colour automatically. |
 | Save doesn't persist | See **Saves** above, and check that the card isn't write-protected. |
