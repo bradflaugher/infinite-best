@@ -56,7 +56,8 @@ the deepest a 10×8 board gets within the Game Boy's generation budget. Typical 
 
 - **RUN** (the roguelike). You start with 40 energy (the tank holds 60), and each move costs 1. Clearing a
   sector refunds its par, and a BEST also pays +1 (+2 on a 3-BEST streak, +3 on a 6-streak). Hints cost 3 and break the BEST streak
-  (asking again while the arrow is still up, or getting no answer, is free). Hitting zero ends the run.
+  (asking again while the arrow is still up, or getting no answer, is free). Hitting zero ends the run, and so does starting a sector with less energy than its par
+  (it can't be won: rewinds never give energy back), with a PAR > ENERGY message.
   An optimal player gains energy every sector, so the run ends when *you* slip. The small tank
   is deliberate: with the old 99 cap and +2-plus-streak bonus, a player who BESTs most sectors
   banked so much energy that mistakes stopped mattering and runs never ended. In a simple
@@ -146,13 +147,13 @@ The BFS inner loop, one slide across the board, is hand-written SM83 assembly
 (`fast_move` in `solver.c`). The portable C version next to it is the reference. The grid is
 stored with a wall border (12×10) so the slide needs no bounds checks, divisions or
 multiplications. Measured in the ROM (`dbg_gen_frames`, 2,400 sectors over 8 seeds), one solve
-costs about 0.64 frames plus 0.0735 frames per state visited on a DMG: the per-solve work outside
-the BFS is worth about 9 units, more than the 5 that `GEN_SOLVE_OVERHEAD` charges, so the
-budget works out at about 215 frames rather than 200 (`ibgen stats` uses the measured fit). The
-budget is checked between solves and one deep solve can overshoot it: the worst measured was
-309 frames (5.2 s), and about 1 in 20 take over 4 s (p99 4.3 s). Typical sectors take 0.9-3.9 s
-(median 2.2 s, the first 100 sectors average 1.9 s) on an original Game Boy and about half that
-in Game Boy Color double-speed mode (median 1.1 s, worst 2.5 s). The time runs
+costs about 0.64 frames plus 0.0735 frames per state visited on a DMG, so the per-solve work
+outside the BFS is worth about 9 visited states, and that is what `GEN_SOLVE_OVERHEAD` charges
+(it used to charge 5, which let about 1 sector in 20 run past 4 s; `ibgen stats` uses the
+measured fit). The budget is checked between solves and one deep solve can overshoot it: the
+worst measured was 269 frames (4.5 s), and 0.7% take over 4 s. Typical sectors take 0.9-3.5 s
+(median 2.2 s, the first 50 sectors average about 1.5 s) on an original Game Boy and about half
+that in Game Boy Color double-speed mode (median 1.05 s, worst 2.2 s). The time runs
 while the clear banner is up, under a "COMPILING" progress bar. The bar is drawn from the VBlank
 interrupt, so it keeps filling (and a highlight keeps running along it) even while the CPU is
 deep inside one solve. A long compile

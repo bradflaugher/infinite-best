@@ -24,7 +24,7 @@ computes it while the next level loads. **Match par and you get a BEST.** There'
 The generator keeps inventing new sectors from a seed and teaching you new rules along the way.
 
 The game is built for short sessions: a sector takes a minute or two, the next one compiles in
-a second or two while you read your grade, and the game saves after every clear. It aims to be thinky without wasting your time.
+a second or two (about two on an original Game Boy) while you read your grade, and the game saves after every clear. It aims to be thinky without wasting your time.
 
 ## What makes it tick
 
@@ -77,7 +77,7 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 
 | Mode | What it is |
 | --- | --- |
-| **RUN** | Roguelike. You start with 40 ⚡ (max 60) and each move costs 1. A clear refunds its par, and a BEST adds +1, rising to +2 on a 3-BEST streak and +3 on a 6-streak. Every wasted move is a real loss, so reach zero and the run ends. Your furthest sector is the record. |
+| **RUN** | Roguelike. You start with 40 ⚡ (max 60) and each move costs 1. A clear refunds its par, and a BEST adds +1, rising to +2 on a 3-BEST streak and +3 on a 6-streak. Every wasted move is a real loss. Reach zero, or start a sector with less energy than its par, and the run ends. Your furthest sector is the record. |
 | **ZEN** | Endless and calm. No energy, free hints, skip any sector. Your sector is saved. |
 | **SEED** | Start a RUN from a seed you type in (the pause and game-over screens show the current one). |
 | **CODEX** | The rules and the HUD icons, plus a field guide that fills in as you discover mechanics. |
@@ -119,9 +119,9 @@ CGB-enhanced: colour and double speed on Color hardware, fully playable on an or
 - **Speed.** The slide inside the BFS is hand-written assembly over a wall-padded 12×10 grid,
   so it needs no bounds checks, multiplies or divides. It is about 10× faster than the
   compiler's version. Generation runs on a fixed work budget (the same on every machine, so it
-  stays deterministic). Measured in the ROM over 2,400 sectors, it typically takes 0.9–3.9 s
-  on a DMG (median 2.2 s; the first 100 sectors average 1.9 s), and about 1 sector in 20 takes
-  4–5 s. A Color takes half as long and never needed more than 2.5 s. It runs while the
+  stays deterministic). Measured in the ROM over 2,400 sectors, it typically takes 0.9–3.5 s
+  on a DMG (median 2.2 s; early sectors are quicker), and fewer than 1 sector in 100 takes over
+  4 s. A Color takes half as long and never needed more than 2.2 s. It runs while the
   clear banner is up.
 - **Determinism.** Everything is fixed-width integer maths on a 32-bit xorshift (two 16-bit
   words, seeded per sector through a small Feistel network so every *(seed, sector)* gets its own
