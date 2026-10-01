@@ -1,6 +1,7 @@
 /* Host unit tests for the portable puzzle core.
  * Build: gcc -std=c99 -Wall -Wextra -Isrc/core tests/test_core.c src/core/{level,rng,solver,gen,run}.c -o build/test_core */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "level.h"
 #include "solver.h"
@@ -56,15 +57,46 @@ static void test_rng(void)
     CHECK_EQ(rng_next(), first);          /* deterministic */
     rng_seed(0);
     CHECK(rng_state != 0);               /* zero seed is remapped */
-    rng_seed(1);
-    do { period++; if (rng_next() == 0) seen_zero = 1; } while (rng_state != 1 && period < 70000);
-    CHECK_EQ(period, 65535);             /* full-period xorshift16 */
-    CHECK(!seen_zero);
+    {   /* 32-bit state: the period is 2^32-1 (checked exhaustively off-line); here,
+         * that the stream doesn't repeat at the old 16-bit period and never sticks at 0 */
+        static uint16_t out[66000];
+        int same = 1;
+        rng_seed(1);
+        for (period = 0; period < 66000; period++) {
+            out[period] = rng_next();
+            if (period && !out[period] && !out[period - 1]) seen_zero = 1;
+        }
+        for (i = 0; i < 400; i++) same &= out[i] == out[i + 65535];
+        CHECK(!same);
+        CHECK(!seen_zero);
+    }
+    {   /* per-sector seeds: every (seed, sector) gets its own stream */
+        static uint32_t seen[4096];
+        uint16_t a, b, j;
+        int dup = 0;
+        for (a = 0; a < 64; a++)
+            for (b = 0; b < 64; b++) {
+                rng_seed2((uint16_t)(a * 7919u), b);
+                seen[a * 64 + b] = ((uint32_t)rng_next() << 16) | rng_next();
+            }
+        for (i = 0; i < 4096; i++)
+            for (j = (uint16_t)(i + 1); j < 4096; j++) dup += seen[i] == seen[j];
+        CHECK_EQ(dup, 0);
+        /* the pair that hits the all-zero state is remapped without aliasing another
+         * (it used to share (0, 0xACE1) with seed 0xD00B, sector 0xC02C) */
+        {
+            uint32_t z, other;
+            rng_seed2(0x31D6, 0x9A36);
+            z = ((uint32_t)rng_next() << 16) | rng_next();
+            CHECK(z != 0);
+            rng_seed2(0xD00B, 0xC02C);
+            other = ((uint32_t)rng_next() << 16) | rng_next();
+            CHECK(z != other);
+        }
+    }
     rng_seed(77);
     for (i = 0; i < 4000; i++) { uint8_t v = rng_range(4); CHECK(v < 4); if (v < 4) hist[v]++; }
     for (i = 0; i < 4; i++) CHECK(hist[i] > 850 && hist[i] < 1150); /* roughly uniform */
-    CHECK(rng_mix(1, 2) != rng_mix(2, 1));
-    CHECK(rng_mix(5, 6) != 0);
 }
 
 static void test_slide_basics(void)
@@ -381,10 +413,179 @@ static void test_mechanics_matter(void)
         total += matter;
     }
     CHECK(total >= 200);   /* of 280; about 120 before the focus rule */
-    rng_seed(1); gen_params(FREEFORM_SECTOR + 1, &p);
-    CHECK_EQ(p.focus, 0xFF);
+    /* freeform sectors and breathers pick one of their mechanics (never chips) to matter */
+    for (i = FREEFORM_SECTOR; i < FREEFORM_SECTOR + 40; i++) {
+        rng_seed(i); gen_params((uint16_t)i, &p);
+        CHECK(p.focus < NUM_MECH && p.focus != M_CHIP && (p.mechs & MBIT(p.focus)));
+    }
     rng_seed(1); gen_params(1, &p);
     CHECK_EQ(p.focus, 0xFF);
+}
+
+/* par with every switch turned into floor (the gates freeze as they start) */
+static uint8_t par_without_switch(const Level *src)
+{
+    Level d = *src;
+    State s;
+    uint8_t i;
+    for (i = 0; i < GN; i++)
+        if (d.cell[i] == T_SWITCH) d.cell[i] = T_FLOOR;
+    state_start(&d, &s);
+    return solve(&d, &s);
+}
+
+/* A lesson has to be *used*, not just be in the way: on its teaching sector every
+ * optimal solution goes over the new pad / router / portal (without them the board
+ * gets longer or unsolvable), the gate lesson needs the switch and the chip lesson
+ * a detour. Before this rule the solution ignored the new tile on 40-60% of lessons
+ * (90% for gates), and the chips lay on the way anyway on 22% of chip lessons. */
+static void test_lessons_use_the_mechanic(void)
+{
+    static const uint8_t used_mechs[] = { M_STOP, M_ARROW, M_PORTAL, M_GATE };
+    Level L;
+    uint16_t seed;
+    uint8_t i, m, p2;
+    int used;
+    for (i = 0; i < sizeof used_mechs; i++) {
+        m = used_mechs[i];
+        used = 0;
+        for (seed = 1; seed <= 40; seed++) {
+            gen_level(&L, (uint16_t)(seed * 977u), mech_unlock[m], 0);
+            p2 = m == M_GATE ? par_without_switch(&L) : par_without(&L, m);
+            used += p2 == SOLVE_NONE || p2 > L.par;
+        }
+        CHECK(used >= 36);
+    }
+    /* the chip lesson needs a detour: with the exit online from the start it's shorter */
+    for (seed = 1; seed <= 40; seed++) {
+        Level V;
+        State st;
+        gen_level(&L, (uint16_t)(seed * 977u), UNLOCK_CHIP, 0);
+        V = L;
+        for (i = 0; i < L.nchips; i++) V.cell[L.chip_pos[i]] = T_FLOOR;
+        V.nchips = 0;
+        state_start(&V, &st);
+        CHECK(solve(&V, &st) < L.par);
+    }
+    /* pits can only block: without them the lesson gets shorter */
+    for (seed = 1; seed <= 40; seed++) {
+        gen_level(&L, (uint16_t)(seed * 977u), UNLOCK_PIT, 0);
+        p2 = par_without(&L, M_PIT);
+        CHECK(p2 != SOLVE_NONE && p2 < L.par);
+    }
+}
+
+static uint8_t special_tile(uint8_t t)
+{
+    return t == T_STOP || (t >= T_ARROW_U && t <= T_GATE_B) || t == T_PIT;
+}
+
+/* The clean-up pass: special tiles whose removal leaves par unchanged are taken off
+ * the board (about 70% of all special tiles were such clutter before it). Routers
+ * never point straight into a wall. */
+static void test_boards_are_tidy(void)
+{
+    Level L, V;
+    State s;
+    uint16_t seed, sector;
+    uint8_t i, t, k, switches, gates;
+    int specials = 0, idle = 0, lesson_idle = 0;
+    for (seed = 1; seed <= 12; seed++) {
+        for (sector = 3; sector <= 120; sector += 3) {
+            gen_level(&L, (uint16_t)(seed * 3331u), sector, 0);
+            switches = gates = 0;
+            for (i = 0; i < GN; i++) {
+                t = L.cell[i];
+                switches += t == T_SWITCH;
+                gates += t == T_GATE_A || t == T_GATE_B;
+                if (t >= T_ARROW_U && t <= T_ARROW_L)
+                    CHECK(L.cell[(uint8_t)(i + dir_dpos[t - T_ARROW_U])] != T_WALL);
+                if (!special_tile(t)) continue;
+                specials++;
+                V = L;
+                V.cell[i] = T_FLOOR;
+                state_start(&V, &s);
+                k = solve(&V, &s) == L.par;
+                idle += k;
+                if (L.featured != 0xFF && L.featured != M_GATE) lesson_idle += k;
+            }
+            /* a gate with no switch to flip it is a wall or floor in disguise */
+            CHECK(gates == 0 || switches > 0);
+        }
+    }
+    CHECK(specials > 500);
+    CHECK(idle * 100 < specials * 30);   /* ~25% (24-29% between 12-seed groups); ~70% before tidy */
+    CHECK_EQ(lesson_idle, 0);
+}
+
+/* No run ever meets the same board twice. With a 16-bit RNG state the sector streams
+ * overlapped: ~20% of boards were exact copies of another (seed, sector), and most
+ * runs that got deep replayed one of their own earlier sectors. */
+static int board_cmp(const void *a, const void *b) { return memcmp(a, b, GN + 1); }
+static void test_no_repeated_boards(void)
+{
+    static uint8_t seen[1200][GN + 1];
+    Level L;
+    uint16_t seed, sector;
+    int n, i, dup = 0;
+    for (seed = 1; seed <= 3; seed++) {
+        n = 0;
+        for (sector = 1; sector <= 400; sector++) {
+            gen_level(&L, (uint16_t)(seed * 40503u), sector, 0);
+            memcpy(seen[n], L.cell, GN);
+            seen[n++][GN] = L.start;
+        }
+        qsort(seen, (size_t)n, GN + 1, board_cmp);
+        for (i = 1; i < n; i++) dup += !memcmp(seen[i], seen[i - 1], GN + 1);
+    }
+    CHECK_EQ(dup, 0);
+}
+
+/* The gate lesson and the sectors that reinforce it (14-17) always keep their gates
+ * and a switch: tidy used to strip the last switch off boards where the gates only
+ * blocked a shortcut, and the gates then froze into plain walls. */
+static void test_gate_sectors_keep_gates(void)
+{
+    Level L;
+    uint16_t seed, sector;
+    int lost = 0;
+    for (seed = 0; seed < 600; seed++) {
+        for (sector = UNLOCK_GATE; sector < UNLOCK_GATE + 4; sector++) {
+            gen_level(&L, (uint16_t)(seed * 977u + 13u), sector, 0);
+            lost += !(L.mechs & MBIT(M_GATE));
+        }
+    }
+    /* the reported seeds, including three gate lessons that came out gate-free */
+    gen_level(&L, 17800, 14, 0); CHECK(L.mechs & MBIT(M_GATE));
+    gen_level(&L, 29932, 14, 0); CHECK(L.mechs & MBIT(M_GATE));
+    gen_level(&L, 35240, 15, 0); CHECK(L.mechs & MBIT(M_GATE));
+    CHECK_EQ(lost, 0);
+}
+
+/* solve_limit cuts the search off: a board that needs more moves reads unsolvable */
+static void test_solve_limit(void)
+{
+    const char *m[LH] = {
+        "P....#....",
+        "..........",
+        "..........",
+        "..........",
+        "..........",
+        "..........",
+        "..........",
+        ".........E" };
+    Level L; State s;
+    parse(&L, m);
+    state_start(&L, &s);
+    CHECK_EQ(solve_limit, SOLVE_MAX_DEPTH);
+    solve_limit = 1;
+    CHECK_EQ(solve(&L, &s), SOLVE_NONE);
+    solve_limit = 2;
+    CHECK_EQ(solve(&L, &s), 2);
+    solve_limit = SOLVE_MAX_DEPTH;
+    /* the generator leaves it as it found it */
+    gen_level(&L, 77, 14, 0);
+    CHECK_EQ(solve_limit, SOLVE_MAX_DEPTH);
 }
 
 static void test_difficulty_curve(void)
@@ -423,7 +624,7 @@ static void test_endless_curve(void)
             if (sec % 7 == 0) continue;
             for (seed = 1; seed <= 8; seed++) {
                 gen_level(&L, (uint16_t)(seed * 4099u), sec, 0);
-                rng_seed(rng_mix((uint16_t)(seed * 4099u), sec)); gen_params(sec, &p);
+                rng_seed2((uint16_t)(seed * 4099u), sec); gen_params(sec, &p);
                 par[b] += L.par;
                 total++;
                 if (L.par >= p.par_min && L.par <= p.par_max) inwin++;
@@ -450,8 +651,8 @@ static void test_run_economy(void)
     CHECK_EQ(run_grade(3, 3), GRADE_BEST);
     CHECK_EQ(run_grade(5, 3), GRADE_GOOD);
     CHECK_EQ(run_grade(6, 3), GRADE_OK);
-    gain = run_on_win(&r, 3);                 /* par clear: par + bonus + streak(1) */
-    CHECK_EQ(gain, 3 + RUN_BEST_BONUS + 1);
+    gain = run_on_win(&r, 3);                 /* par clear: par + BEST bonus */
+    CHECK_EQ(gain, 3 + RUN_BEST_BONUS);
     CHECK_EQ(r.streak, 1);
     CHECK_EQ(r.sector, 2);
     CHECK_EQ(r.moves, 0);
@@ -463,10 +664,22 @@ static void test_run_economy(void)
     CHECK_EQ(r.bests, 1);
     CHECK_EQ(r.cleared, 2);
     /* energy cap */
-    r.energy = 98;
+    r.energy = RUN_MAX_ENERGY - 1;
     r.moves = 1;
     run_on_win(&r, 9);
     CHECK_EQ(r.energy, RUN_MAX_ENERGY);
+    /* the streak bonus steps up every RUN_STREAK_STEP BESTs, then stops */
+    CHECK_EQ(run_best_bonus(1), 1);
+    CHECK_EQ(run_best_bonus(2), 1);
+    CHECK_EQ(run_best_bonus(3), 2);
+    CHECK_EQ(run_best_bonus(5), 2);
+    CHECK_EQ(run_best_bonus(6), 3);
+    CHECK_EQ(run_best_bonus(200), 3);
+    /* a BEST nets +bonus over the moves spent; one move over par nets -1 */
+    r.energy = 20; r.streak = 0; r.moves = 5;
+    CHECK_EQ(run_on_win(&r, 5), 5 + 1);
+    r.moves = 6;
+    CHECK_EQ(run_on_win(&r, 5), 5);
     /* hints */
     r.energy = RUN_HINT_COST;
     CHECK(!run_try_hint(&r));
@@ -502,6 +715,11 @@ int main(void)
     test_generator_determinism();
     test_teaching_levels();
     test_mechanics_matter();
+    test_lessons_use_the_mechanic();
+    test_boards_are_tidy();
+    test_gate_sectors_keep_gates();
+    test_no_repeated_boards();
+    test_solve_limit();
     test_difficulty_curve();
     test_endless_curve();
     test_run_economy();

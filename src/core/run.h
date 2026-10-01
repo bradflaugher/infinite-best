@@ -5,12 +5,15 @@
 /* Run-mode economy: every move costs one CYCLE of energy. Rewind is free, but
  * spent energy never comes back ("time only flows forward for your battery").
  * Clearing a sector refunds its par; a BEST (par-perfect) clear pays a bonus that
- * grows with your streak. Hitting zero ends the run. */
-#define RUN_START_ENERGY 30
-#define RUN_MAX_ENERGY   99
+ * grows with your streak (+1, +2 from a 3-streak, +3 from a 6-streak). Hitting zero
+ * ends the run. The cap is kept low on purpose: with a deep tank, a good player could
+ * bank enough energy to never feel a mistake, and the run would never end. */
+#define RUN_START_ENERGY 40
+#define RUN_MAX_ENERGY   60
 #define RUN_HINT_COST    3
-#define RUN_BEST_BONUS   2
-#define RUN_STREAK_CAP   4
+#define RUN_BEST_BONUS   1
+#define RUN_STREAK_STEP  3   /* +1 more bonus every this many BESTs in a row... */
+#define RUN_STREAK_MAX   2   /* ...up to this much more */
 
 enum { MODE_RUN = 0, MODE_ZEN };
 enum { GRADE_OK = 0, GRADE_GOOD, GRADE_BEST };
@@ -33,6 +36,8 @@ void run_start(Run *r, uint8_t mode, uint16_t seed, uint16_t sector);
 uint8_t run_on_move(Run *r);
 /* grade of a clear using `moves` actually made vs par */
 uint8_t run_grade(uint8_t moves, uint8_t par);
+/* energy a BEST pays on top of par, given the streak including this clear */
+uint8_t run_best_bonus(uint8_t streak);
 /* call on win; returns energy gained (run mode) */
 uint8_t run_on_win(Run *r, uint8_t par);
 /* returns 1 and charges if a hint is affordable */

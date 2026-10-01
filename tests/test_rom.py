@@ -25,10 +25,12 @@ PS_IDLE, PS_SLIDE, PS_DEAD, PS_WIN, PS_PAUSE, PS_INTRO = range(6)
 GN = 120
 LEVEL_PAR = GN + 1 + 1 + 3 + 2       # offset of Level.par
 RUN_SECTOR, RUN_ENERGY, RUN_STREAK, RUN_MOVES = 3, 5, 6, 12
+RUN_CLEARED = 10
 DIRS = {'U': 'up', 'R': 'right', 'D': 'down', 'L': 'left'}
 SRAM_SIZE = 8192
 SAVE_SLOTS = (0xA000, 0xA020)   # primary + backup copy of SaveData
 SAVE_BEST_SECTOR = 3            # offset of SaveData.run_best_sector
+SAVE_BEST_BESTS, SAVE_BEST_STREAK = 5, 7
 
 
 def ibgen(*args):
@@ -161,6 +163,7 @@ class Game:
     def abandon(self):
         self.press('start', after=10)
         self.press('up')                  # wraps to ABANDON
+        self.press('a', after=5)          # asks SURE?
         self.press('a', after=10)
 
     def stop(self):
@@ -320,12 +323,60 @@ class RomTest(unittest.TestCase):
                         g.continue_after_win()
         self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_OVER, 600))
         self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 600))
-        # first run on a fresh save always beats the record
-        self.assertTrue(g.wait(lambda: 'NEW RECORD!' in g.screen_text(), 120))
+        # on a fresh save any clear beats the record; a run that cleared
+        # nothing does not (it used to claim NEW RECORD! anyway)
+        cleared = g.u16('run', RUN_CLEARED)
+        self.assertEqual(g.wait(lambda: 'NEW RECORD!' in g.screen_text(), 120), cleared > 0)
         g.run(70)
         g.shot('gameover')
         g.press('a', after=10)
         self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_TITLE, 600))
+
+    def test_energy_below_par_ends_run(self):
+        """With less energy than par at the start, the run is lost: it ends at once."""
+        g = self.g
+        g.start_run(0x1D0B)
+        par = g.u8('level', LEVEL_PAR)
+        g.pb.memory[g.addr('run') + RUN_ENERGY] = par - 1
+        self.assertTrue(g.wait(lambda: 'PAR > ENERGY' in g.win_text(), 30))
+        self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_OVER, 300))
+        self.assertEqual(g.u8('run', RUN_MOVES), 0)
+        self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 600))
+
+    def test_restart_low_energy_can_rewind(self):
+        """After a restart the history still holds later states: no PAR > ENERGY."""
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        par, moves = ibgen('solve', seed, 1)
+        for d in moves[:-1]:                     # stop one move short of the exit
+            g.wait(g.ready, 600)
+            g.move(d)
+        g.wait(g.ready, 300)
+        g.pb.memory[g.addr('run') + RUN_ENERGY] = 1
+        g.press('start', after=10)
+        g.press('down')
+        g.press('a', after=10)                   # RESTART
+        self.assertTrue(g.wait(g.ready, 300))
+        g.run(60)
+        self.assertEqual(g.u8('game_state'), GS_PLAY)
+        self.assertNotIn('PAR > ENERGY', g.win_text())
+        g.press('b', hold=4, after=30)           # undo the restart...
+        self.assertTrue(g.wait(g.ready, 300))
+        g.move(moves[-1])                        # ...and finish with the last energy
+        self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_GEN or g.ps_in(PS_WIN), 600))
+
+    def test_energy_equal_to_par_still_plays(self):
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        par = g.u8('level', LEVEL_PAR)
+        g.pb.memory[g.addr('run') + RUN_ENERGY] = par
+        g.run(30)
+        self.assertEqual(g.u8('game_state'), GS_PLAY)
+        g.solve_current(seed)                    # exactly par moves: a win at 0 left over
+        g.continue_after_win()
+        self.assertEqual(g.u16('run', RUN_SECTOR), 2)
 
     def test_seed_entry(self):
         g = self.g
@@ -434,6 +485,132 @@ class RomTest(unittest.TestCase):
             g.move(d)
         self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_GEN, 600))
         self.assertIn('MOVES 99', g.win_text())
+
+
+    def test_hint_not_charged_twice(self):
+        """SELECT again with the same hint still up re-shows it for free."""
+        g = self.g
+        g.start_run(0x1D0B)
+        energy = g.u8('run', RUN_ENERGY)
+        g.press('select', after=5)
+        self.assertTrue(g.hint_visible())
+        self.assertEqual(g.u8('run', RUN_ENERGY), energy - 3)
+        g.press('select', after=5)
+        g.press('select', after=5)
+        self.assertEqual(g.u8('run', RUN_ENERGY), energy - 3)
+        self.assertTrue(g.hint_visible())
+        self.assertIn('MOVES LEFT:', g.win_text())
+        # the pause menu's HINT is the same hint: no charge either
+        g.press('start', after=10)
+        g.press('down'); g.press('down')
+        g.press('a', after=10)
+        self.assertEqual(g.u8('run', RUN_ENERGY), energy - 3)
+        # after a move the next hint is a new one and costs again
+        _, sol = ibgen('solve', 0x1D0B, 1)
+        g.wait(g.ready, 300)
+        g.move(sol[0])
+        g.wait(g.ready, 300)
+        g.press('select', after=5)
+        self.assertEqual(g.u8('run', RUN_ENERGY), energy - 1 - 6)
+
+    def test_abandon_needs_confirm(self):
+        g = self.g
+        g.start_run(0x1D0B)
+        g.press('start', after=10)
+        g.press('up')                     # RESUME wraps to ABANDON
+        g.press('a', after=10)
+        self.assertEqual(g.u8('ps'), PS_PAUSE)
+        self.assertEqual(g.u8('game_state'), GS_PLAY)
+        self.assertIn('SURE? A=YES', g.win_text())
+        g.shot('abandon_confirm')
+        # moving off it disarms and restores the label; A on RESUME resumes
+        g.press('down')
+        self.assertNotIn('SURE?', g.win_text())
+        self.assertIn('ABANDON', g.win_text())
+        g.press('a', after=10)
+        self.assertTrue(g.wait(g.ready, 300))
+        # the full confirm still ends the run
+        g.abandon()
+        self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 900))
+
+    def test_tutorial_lines_and_hud(self):
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        # the sector sits left-aligned, clear of the par flag
+        self.assertEqual(g.win_text().split('\n')[0][:5], 'S1   ')
+        while g.u16('run', RUN_SECTOR) < 4:
+            g.solve_current(seed)
+            g.continue_after_win()
+        # sector 3 teaches stop pads, so the SELECT line lives on sector 4
+        self.assertIn('SELECT: HINT', g.win_text())
+        # DMG: the live player uses OBP1, a brighter ramp than the walls
+        self.assertTrue(g.pb.memory[0xFE03] & 0x10)
+        if not self.CGB:
+            self.assertEqual(g.pb.memory[0xFF49], 0xC4)
+
+
+    def test_crash_keeps_full_history(self):
+        """A crash never touches the rewind history, even when it is full."""
+        g = self.g
+        g.start_run(0x1D0B)
+        start = g.u8('st')
+        cells = g.level_cells()
+        # put a pit next to the start (independent of what the generator built there)
+        d, off = next((d, o) for d, o in (('L', -1), ('R', 1), ('U', -12), ('D', 12))
+                      if cells[start + o] == 0)
+        g.pb.memory[g.addr('level') + start + off] = 15
+        g.set_u16('hist_n', 256)                 # as if 256 moves were already made
+        g.move(d)
+        self.assertTrue(g.wait(g.ready, 300))
+        self.assertEqual(g.u8('st'), start)
+        self.assertEqual(g.u16('hist_n'), 256, 'crash evicted a history entry')
+        self.assertEqual(g.u8('run', RUN_MOVES), 1)
+
+    def test_dead_end_hint_is_free(self):
+        g = self.g
+        g.start_run(0x1D0B)
+        cells = g.level_cells()
+        a = g.addr('level')
+        g.pb.memory[a + cells.index(2)] = 0      # remove the exit: nothing can solve it
+        energy = g.u8('run', RUN_ENERGY)
+        g.press('select', after=5)
+        self.assertTrue(g.wait(lambda: 'DEAD END' in g.win_text(), 120))
+        self.assertEqual(g.u8('run', RUN_ENERGY), energy)
+
+    def test_big_numbers_saturate(self):
+        g = self.g
+        g.start_run(0x1D0B)
+        a = g.addr('run') + RUN_SECTOR
+        g.pb.memory[a], g.pb.memory[a + 1] = 10000 & 0xFF, 10000 >> 8
+        g.press('start', after=10)
+        g.press('b', after=10)                   # resume redraws the HUD
+        self.assertEqual(g.win_text().split('\n')[0][:5], 'S9999')
+        g.abandon()                              # the summary used to show 0000
+        self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 900))
+        self.assertTrue(g.wait(lambda: 'RECORD' in g.screen_text(), 120))
+        self.assertIn('SECTOR    9999', g.screen_text())
+
+    def test_no_record_without_clears(self):
+        g = self.g
+        g.start_run(0x1D0B)
+        g.abandon()
+        self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 900))
+        self.assertFalse(g.wait(lambda: 'NEW RECORD' in g.screen_text(), 120))
+
+    def test_records_saved_on_clear(self):
+        """BEST count and streak records hit SRAM as they happen, not at game over."""
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        for _ in range(2):
+            g.solve_current(seed)
+            g.continue_after_win()
+        sram = g.sram()
+        for base in SAVE_SLOTS:
+            o = base - 0xA000
+            self.assertEqual(sram[o + SAVE_BEST_BESTS], 2)
+            self.assertEqual(sram[o + SAVE_BEST_STREAK], 2)
 
 
 class RomTestCGB(RomTest):

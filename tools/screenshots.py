@@ -11,7 +11,7 @@ from test_rom import Game, GS_GEN, GS_OVER, GS_TITLE, PS_INTRO, RUN_SECTOR, DIRS
 
 OUT = os.path.join(ROOT, 'docs', 'screens')
 SCALE = 3
-SEED = 0xB357
+SEED = 0x7A3C   # sector 20 mixes portals, gates, a router, pads and pits (play.png + gif)
 
 
 def frame(g, scale=SCALE):
@@ -76,7 +76,7 @@ def main():
     g.run(30)
     save(g, 'intro')
     g.skip_intro()
-    advance_to(g, 19)
+    advance_to(g, 20)
     g.run(30)
     save(g, 'play')
     record_gif(g, 2, 'gameplay')
@@ -110,6 +110,10 @@ def main():
 
     g = Game(True)
     g.start_run(0x0BAD)
+    # clear a few sectors first so the summary shows a real run, then waste moves
+    for _ in range(5):
+        g.solve_current(0x0BAD)
+        g.continue_after_win()
     while g.u8('game_state') != GS_OVER:
         for d in 'LRUD':
             g.wait(lambda: g.ready() or g.u8('game_state') not in (4,), 300)
@@ -119,6 +123,8 @@ def main():
                 g.move(d)
     g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 900)
     g.run(40)
+    g.wait(lambda: 'NEW RECORD' in g.screen_text(), 60)   # it blinks
+    g.run(2)
     save(g, 'gameover')
     g.stop()
 

@@ -24,14 +24,19 @@ computes it while the next level loads. **Match par and you get a BEST.** There'
 The generator keeps inventing new sectors from a seed and teaching you new rules along the way.
 
 The game is built for short sessions: a sector takes a minute or two, the next one compiles in
-a second or two while you read your grade, and the game saves after every clear. It aims to be thinky without wasting your time.
+a second or two (about two on an original Game Boy) while you read your grade, and the game saves after every clear. It aims to be thinky without wasting your time.
 
 ## What makes it tick
 
 - **Wordless teaching.** Each new mechanic arrives on a sector designed around it, with a
-  one-line label. The generator checks that the new idea actually matters: it strips the
-  mechanic out, re-solves, and rejects the level if the par doesn't change. The sectors that
-  follow keep asking the newest idea to matter, so it doesn't fade into decoration. *(After The Witness.)*
+  one-line label. The generator checks that you actually have to *use* the new idea: it strips
+  the mechanic out, re-solves, and rejects the level unless that makes it longer or unsolvable
+  (the gate lesson needs its switch, the chip lesson a detour, and pits, which can only get in
+  your way, must close a shortcut). The sectors that follow keep asking the newest idea to
+  matter, so it doesn't fade into decoration. *(After The Witness.)*
+- **Nothing on the board is clutter.** After a sector is found, a clean-up pass takes off
+  every pad, pit, router, gate and portal that par doesn't need, so what's left is there for a
+  reason. Before it, about 70% of special tiles changed nothing.
 - **Rewind is free; time is not.** Hold **B** to rewind up to 256 moves back. The screen ripples
   and the music detunes. But your move counter and energy only go forward, so rewinding helps
   you understand the puzzle but can't earn you par. *(After Braid.)*
@@ -65,17 +70,17 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 | --- | --- |
 | D-pad | Slide |
 | **B** (hold) | Rewind, free, up to 256 moves back (energy already spent stays spent) |
-| **SELECT** | Hint: the optimal next move and how many moves remain (costs 3 energy in RUN) |
-| **START** | Pause: resume · restart · hint/skip · quit |
+| **SELECT** | Hint: the optimal next move and how many moves remain. In RUN it costs 3 energy and breaks your BEST streak. Asking again while the arrow is still showing is free, and so is a hint that finds no way out |
+| **START** | Pause: resume · restart · hint/skip · quit (abandoning a RUN asks you to confirm) |
 
 ### Modes
 
 | Mode | What it is |
 | --- | --- |
-| **RUN** | Roguelike. You start with 30 ⚡ and each move costs 1. A clear refunds its par, and a BEST adds +2 plus your streak. Reach zero and the run ends. Your furthest sector is the record. |
+| **RUN** | Roguelike. You start with 40 ⚡ (max 60) and each move costs 1. A clear refunds its par, and a BEST adds +1, rising to +2 on a 3-BEST streak and +3 on a 6-streak. Every wasted move is a real loss. Reach zero, or start a sector with less energy than its par, and the run ends. Your furthest sector is the record. |
 | **ZEN** | Endless and calm. No energy, free hints, skip any sector. Your sector is saved. |
 | **SEED** | Start a RUN from a seed you type in (the pause and game-over screens show the current one). |
-| **CODEX** | The rules, plus a field guide that fills in as you discover mechanics. |
+| **CODEX** | The rules and the HUD icons, plus a field guide that fills in as you discover mechanics. |
 
 ### The rules, in the order you meet them
 
@@ -89,7 +94,7 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 | 11 | Router | Bends your slide. Two routers facing each other cause a `STACK OVERFLOW`. |
 | 14 | Toggle gates | A switch flips which gate colour is solid, even mid-slide. |
 | 18 | Portal | Warps you to its twin, keeping your momentum. |
-| 22+ | Everything | Sectors mix 2-4 mechanics (3-5 from 80), and par keeps climbing for hundreds of sectors. Every 7th sector is a breather. |
+| 22+ | Everything | Sectors mix 2-4 mechanics (3-5 from 80), at least one of which the solution needs, and par keeps climbing for hundreds of sectors. Every 7th sector is a breather built around one idea. |
 
 <p align="center">
   <img src="docs/screens/pause.png" width="240" alt="Pause menu">
@@ -106,6 +111,7 @@ CGB-enhanced: colour and double speed on Color hardware, fully playable on an or
   unlocked mechanics, then hill-climbs the closest one: it toggles walls and moves tiles, and it
   moves the exit to the stop furthest from the start, keeping edits that bring par into the
   sector's window. Random rolls top out around par 10. The climb takes deep sectors to 13-15.
+  A last pass removes the special tiles that par doesn't need.
 - **The solver** (`src/core/solver.c`) runs a breadth-first search over every reachable
   *(position × chips × switch)* state, at most 1280 of them, to find the exact par. Candidates
   outside the sector's difficulty window are rejected. A hand-built fallback means the game
@@ -113,10 +119,14 @@ CGB-enhanced: colour and double speed on Color hardware, fully playable on an or
 - **Speed.** The slide inside the BFS is hand-written assembly over a wall-padded 12×10 grid,
   so it needs no bounds checks, multiplies or divides. It is about 10× faster than the
   compiler's version. Generation runs on a fixed work budget (the same on every machine, so it
-  stays deterministic): typically 0.2–1.5 s on a DMG and about half that on a Color, and fewer
-  than 1 sector in 1,000 takes over 4 s. It runs while the clear banner is up.
-- **Determinism.** Everything is fixed-width integer maths on a 16-bit xorshift, so the Game Boy
-  and a PC generate *byte-identical* sectors, and CI checks this.
+  stays deterministic). Measured in the ROM over 2,400 sectors, it typically takes 0.9–3.5 s
+  on a DMG (median 2.2 s; early sectors are quicker), and fewer than 1 sector in 100 takes over
+  4 s. A Color takes half as long and never needed more than 2.2 s. It runs while the
+  clear banner is up.
+- **Determinism.** Everything is fixed-width integer maths on a 32-bit xorshift (two 16-bit
+  words, seeded per sector through a small Feistel network so every *(seed, sector)* gets its own
+  stream and no run ever replays a board), so the Game Boy and a PC generate *byte-identical*
+  sectors, and CI checks this.
 - **Sound.** A custom 4-channel driver runs from VBlank. It has instruments, arpeggios, vibrato,
   glide, three wavetables, and sfx that borrow channels and give them back cleanly. The songs
   are written in a small tracker notation (`assets/music/songs.py`): *Title* (E minor
@@ -131,7 +141,7 @@ src/core/     portable puzzle core: compiles with SDCC *and* gcc
   solver.*      BFS solver + hints; SM83 asm hot loop, C reference on host
   gen.*         deterministic generator, difficulty curve, teaching sectors
   run.*         RUN/ZEN economy: energy, par grades, streaks
-  rng.*         16-bit xorshift, identical everywhere
+  rng.*         32-bit xorshift on 16-bit words, identical everywhere
 src/gb/       Game Boy front-end
   game.c        title, play loop, win / crash / game over, pause, codex, seeds  [banked]
   gfx.c         drawing, CGB palettes, shake / flash / wave FX, particles       [bank 0]
@@ -165,17 +175,19 @@ python3 tools/screenshots.py   # regenerate the images in this README
 build/ibgen show 42 30     # ASCII render of seed 42, sector 30
 build/ibgen solve 42 30    # optimal solution, e.g. "9 DLLDLDLUR"
 build/ibgen stats 100 100  # generator statistics over 10,000 sectors
+build/ibgen quality 20 300 # puzzle-quality metrics per sector band (see below)
+build/ibgen q 42 30        # one board with its quality metrics
 ```
 
 ### Tests
 
-- **Core, ~28k assertions.**
+- **Core, ~29k assertions.**
   - Every rule and edge case: slides, chips, stop pads, pits, router loops, gates flipping
     mid-slide, portals, unsolvable boards, hints.
   - About 1,500 generated sectors, each replayed along the solver's hint chain and required to
     finish in exactly `par` moves.
-  - Determinism, teaching sectors, the difficulty curve, the energy economy, and the RNG's full
-    65,535 period.
+  - Determinism, teaching sectors (the lesson is used, not just present), the clean-up pass,
+    the difficulty curve, the energy economy, the RNG (no repeated boards), and gate sectors keeping their gates.
 - **Sound, 570 assertions.** Plays every song and effect against a fake APU and checks the
   register writes. Also covers channel ownership, loops, rewind and muffle, plus a random stress
   test.
@@ -186,8 +198,9 @@ build/ibgen stats 100 100  # generator statistics over 10,000 sectors
     validates the assembly against the C reference.
   - Plays 20 sectors (every mechanic) using the host's optimal solutions and checks that every
     clear is a BEST.
-  - Tests rewind (state restored, energy not refunded), pause/restart, seed entry, running out
-    of energy, the game-over screen and the codex.
+  - Tests rewind (state restored, energy not refunded, a crash never costs history), pause/restart,
+    the abandon confirm, hint pricing, seed entry, running out of energy, records saved on every
+    clear, number saturation, the game-over screen and the codex.
 
 ### CI and releases
 

@@ -9,6 +9,9 @@
  * Returns optimal number of moves to win from *from, or SOLVE_NONE (0) if unsolvable.
  * (from == a winning state is impossible: winning ends the level.) */
 uint8_t solve(const Level *L, const State *from) CORE_BANKED;
+/* solve() gives up (SOLVE_NONE) past this many moves; SOLVE_MAX_DEPTH unless a
+ * caller only needs to know whether a board can be solved within a bound. */
+extern uint8_t solve_limit;
 /* Number of distinct states visited by the last solve() (a branching/quality metric). */
 extern uint16_t solve_visited;
 /* BFS with the exit switched off: the floor cell you can stop on (with every chip
