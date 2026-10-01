@@ -40,7 +40,7 @@ $(BUILD)/test_core: tests/test_core.c $(CORE_SRC) | $(BUILD)
 $(BUILD)/test_sound: tests/test_sound.c src/gb/sound.c src/gb/music_data.c | $(BUILD)
 	$(CC) $(HOST_CFLAGS) -DHOST_TEST -Isrc/gb -o $@ tests/test_sound.c src/gb/sound.c src/gb/music_data.c
 
-$(BUILD)/ibgen: tools/ibgen.c $(CORE_SRC) | $(BUILD)
+$(BUILD)/ibgen: tools/ibgen.c tools/quality.h $(CORE_SRC) | $(BUILD)
 	$(CC) $(HOST_CFLAGS) -o $@ tools/ibgen.c $(CORE_SRC)
 
 test-host: $(BUILD)/test_core $(BUILD)/test_sound $(BUILD)/ibgen
