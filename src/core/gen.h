@@ -18,7 +18,7 @@
 #define GEN_DEEP_RANDOM 4       /* ...only this many random rolls before climbing */
 #define GEN_CLIMB_FOCUS_STEPS 32
 #define GEN_CLIMB_STALL 20      /* fruitless edits before the climb restarts */
-#define GEN_SOLVE_OVERHEAD 5    /* per-solve setup, in visited-state units */
+#define GEN_SOLVE_OVERHEAD 9    /* per-solve setup, in visited-state units (measured: ~0.64 frames per solve vs 0.0735 per state) */
 #define GEN_BUDGET 2600         /* ~215 frames on a DMG, ~105 on a Color (measured) */
 #define GEN_TEACH_ATTEMPTS 96   /* teaching sectors roll longer (and ignore GEN_BUDGET) */
 #define GEN_TIDY_COST 800       /* the clean-up pass spends at most this much... */

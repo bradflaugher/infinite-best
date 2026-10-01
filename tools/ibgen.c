@@ -108,7 +108,8 @@ int main(int argc, char **argv)
          * 0.0735 per gen_cost unit plus 0.27 per solve (the per-solve work outside the BFS
          * is about 0.64 frames, more than GEN_SOLVE_OVERHEAD charges). Within ~10 frames
          * typically; a few sectors run up to ~75 frames longer. Halve it for a Color. */
-#define DMG_FRAMES(cost, solves) (0.0735 * (cost) + 0.27 * (solves))
+/* (in terms of states visited, 0.0735 each, and solves, 0.635 each, whatever the overhead) */
+#define DMG_FRAMES(cost, solves) (0.0735 * (cost) + (0.635 - 0.0735 * GEN_SOLVE_OVERHEAD) * (solves))
         int seeds = atoi(argv[2]), sectors = atoi(argv[3]);
         long n = 0, fallback = 0, inwin = 0, total_solves = 0, over4 = 0;
         double total_f = 0, max_f = 0;

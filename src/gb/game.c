@@ -721,6 +721,17 @@ static void play(void)
         }
         switch (ps) {
         case PS_IDLE:
+            /* From the start it takes par moves and energy never comes back, so with
+             * less energy than par the run is already lost: say so instead of making
+             * the player grind down to zero. */
+            if (run.mode == MODE_RUN && !rewinding && st.pos == level.start && !st.chips
+                && !st.sw && run.energy < level.par) {
+                hud_msg("PAR > ENERGY");
+                wait_frames(90);
+                game_over();
+                game_state = GS_TITLE;
+                break;
+            }
             if (buf_dir == BUF_REWIND) {         /* B went down mid-slide */
                 buf_dir = 0xFF;
                 if (keys & J_B) pressed |= J_B;

@@ -332,6 +332,29 @@ class RomTest(unittest.TestCase):
         g.press('a', after=10)
         self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_TITLE, 600))
 
+    def test_energy_below_par_ends_run(self):
+        """With less energy than par at the start, the run is lost: it ends at once."""
+        g = self.g
+        g.start_run(0x1D0B)
+        par = g.u8('level', LEVEL_PAR)
+        g.pb.memory[g.addr('run') + RUN_ENERGY] = par - 1
+        self.assertTrue(g.wait(lambda: 'PAR > ENERGY' in g.win_text(), 30))
+        self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_OVER, 300))
+        self.assertEqual(g.u8('run', RUN_MOVES), 0)
+        self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 600))
+
+    def test_energy_equal_to_par_still_plays(self):
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        par = g.u8('level', LEVEL_PAR)
+        g.pb.memory[g.addr('run') + RUN_ENERGY] = par
+        g.run(30)
+        self.assertEqual(g.u8('game_state'), GS_PLAY)
+        g.solve_current(seed)                    # exactly par moves: a win at 0 left over
+        g.continue_after_win()
+        self.assertEqual(g.u16('run', RUN_SECTOR), 2)
+
     def test_seed_entry(self):
         g = self.g
         g.wait(lambda: g.u8('game_state') == GS_TITLE)
