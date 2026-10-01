@@ -145,11 +145,14 @@ Rejecting boards the naive player solves was tried too: it barely moved the numb
 The BFS inner loop, one slide across the board, is hand-written SM83 assembly
 (`fast_move` in `solver.c`). The portable C version next to it is the reference. The grid is
 stored with a wall border (12×10) so the slide needs no bounds checks, divisions or
-multiplications. One solve costs about 0.4 frames plus 0.075 frames per state visited on a
-DMG, so the budget works out at about 200 frames. The budget is checked between solves and one deep solve
-can overshoot it: the worst seen over 100,000 sectors was about 260 frames (4.3 s), and fewer than
-1 in 1,000 take over 4 s. Typical sectors take 1-3.7 s (median 2.2 s, the first 100 sectors
-average 1.7 s) on an original Game Boy and about half that in Game Boy Color double-speed mode. The time runs
+multiplications. Measured in the ROM (`dbg_gen_frames`, 2,400 sectors over 8 seeds), one solve
+costs about 0.64 frames plus 0.0735 frames per state visited on a DMG: the per-solve work outside
+the BFS is worth about 9 units, more than the 5 that `GEN_SOLVE_OVERHEAD` charges, so the
+budget works out at about 215 frames rather than 200 (`ibgen stats` uses the measured fit). The
+budget is checked between solves and one deep solve can overshoot it: the worst measured was
+309 frames (5.2 s), and about 1 in 20 take over 4 s (p99 4.3 s). Typical sectors take 0.9-3.9 s
+(median 2.2 s, the first 100 sectors average 1.9 s) on an original Game Boy and about half that
+in Game Boy Color double-speed mode (median 1.1 s, worst 2.5 s). The time runs
 while the clear banner is up, under a "COMPILING" progress bar. The bar is drawn from the VBlank
 interrupt, so it keeps filling (and a highlight keeps running along it) even while the CPU is
 deep inside one solve. A long compile

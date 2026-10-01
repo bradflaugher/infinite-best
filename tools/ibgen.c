@@ -104,11 +104,17 @@ int main(int argc, char **argv)
         return 0;
     }
     if (!strcmp(argv[1], "stats")) {
-        /* attempts = solver calls; cost = gen_cost (~0.077 frames each on a DMG) */
+        /* DMG frames, fitted to dbg_gen_frames measured in the ROM (PyBoy, 2400 sectors):
+         * 0.0735 per gen_cost unit plus 0.27 per solve (the per-solve work outside the BFS
+         * is about 0.64 frames, more than GEN_SOLVE_OVERHEAD charges). Within ~10 frames
+         * typically; a few sectors run up to ~75 frames longer. Halve it for a Color. */
+#define DMG_FRAMES(cost, solves) (0.0735 * (cost) + 0.27 * (solves))
         int seeds = atoi(argv[2]), sectors = atoi(argv[3]);
-        long n = 0, fallback = 0, inwin = 0, total_cost = 0, max_cost = 0, total_solves = 0;
+        long n = 0, fallback = 0, inwin = 0, total_solves = 0, over4 = 0;
+        double total_f = 0, max_f = 0;
         for (int sec = 1; sec <= sectors; sec++) {
-            long spar = 0, scost = 0, smax = 0, swin = 0;
+            long spar = 0, swin = 0;
+            double sf = 0, smax = 0, f;
             for (int s = 1; s <= seeds; s++) {
                 GenParams p;
                 uint16_t seed = (uint16_t)(s * 7919);
@@ -120,18 +126,18 @@ int main(int argc, char **argv)
                 if (L.attempts == 0xFF) fallback++;
                 if (L.par >= p.par_min && L.par <= p.par_max) { inwin++; swin++; }
                 spar += L.par;
-                scost += gen_cost; total_cost += gen_cost;
-                if (gen_cost > smax) smax = gen_cost;
-                if (gen_cost > max_cost) max_cost = gen_cost;
+                f = DMG_FRAMES(gen_cost, gen_solves);
+                sf += f; total_f += f;
+                if (f > smax) smax = f;
+                if (f > max_f) max_f = f;
+                if (f > 240) over4++;
             }
             if (sec <= 30 || sec % 25 == 0)
                 printf("sector %4d  avg par %5.2f  in window %3ld%%  DMG frames avg %4.0f max %4.0f\n",
-                       sec, (double)spar / seeds, swin * 100 / seeds,
-                       (double)scost / seeds * 0.077, (double)smax * 0.077);
+                       sec, (double)spar / seeds, swin * 100 / seeds, sf / seeds, smax);
         }
-        printf("levels %ld  in window %ld%%  avg solves %.1f  DMG frames avg %.0f max %.0f  fallback %ld\n",
-               n, inwin * 100 / n, (double)total_solves / n, (double)total_cost / n * 0.077,
-               (double)max_cost * 0.077, fallback);
+        printf("levels %ld  in window %ld%%  avg solves %.1f  DMG frames avg %.0f max %.0f  >4s %.2f%%  fallback %ld\n",
+               n, inwin * 100 / n, (double)total_solves / n, total_f / n, max_f, over4 * 100.0 / n, fallback);
         return 0;
     }
     return 2;
