@@ -453,13 +453,16 @@ static void test_boards_are_tidy(void)
     Level L, V;
     State s;
     uint16_t seed, sector;
-    uint8_t i, t, k;
+    uint8_t i, t, k, switches, gates;
     int specials = 0, idle = 0, lesson_idle = 0;
     for (seed = 1; seed <= 12; seed++) {
         for (sector = 3; sector <= 120; sector += 3) {
             gen_level(&L, (uint16_t)(seed * 3331u), sector, 0);
+            switches = gates = 0;
             for (i = 0; i < GN; i++) {
                 t = L.cell[i];
+                switches += t == T_SWITCH;
+                gates += t == T_GATE_A || t == T_GATE_B;
                 if (t >= T_ARROW_U && t <= T_ARROW_L)
                     CHECK(L.cell[(uint8_t)(i + dir_dpos[t - T_ARROW_U])] != T_WALL);
                 if (!special_tile(t)) continue;
@@ -471,6 +474,8 @@ static void test_boards_are_tidy(void)
                 idle += k;
                 if (L.featured != 0xFF && L.featured != M_GATE) lesson_idle += k;
             }
+            /* a gate with no switch to flip it is a wall or floor in disguise */
+            CHECK(gates == 0 || switches > 0);
         }
     }
     CHECK(specials > 500);

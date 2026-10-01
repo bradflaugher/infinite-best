@@ -507,15 +507,15 @@ class RomTest(unittest.TestCase):
     def test_crash_keeps_full_history(self):
         """A crash never touches the rewind history, even when it is full."""
         g = self.g
-        seed = 0x1D0B
-        g.start_run(seed)
-        while g.u16('run', RUN_SECTOR) < 8:      # 8 teaches pits
-            g.solve_current(seed)
-            g.continue_after_win()
+        g.start_run(0x1D0B)
         start = g.u8('st')
-        self.assertEqual(g.level_cells()[start - 1], 15, 'expected a pit left of the start')
+        cells = g.level_cells()
+        # put a pit next to the start (independent of what the generator built there)
+        d, off = next((d, o) for d, o in (('L', -1), ('R', 1), ('U', -12), ('D', 12))
+                      if cells[start + o] == 0)
+        g.pb.memory[g.addr('level') + start + off] = 15
         g.set_u16('hist_n', 256)                 # as if 256 moves were already made
-        g.move('L')
+        g.move(d)
         self.assertTrue(g.wait(g.ready, 300))
         self.assertEqual(g.u8('st'), start)
         self.assertEqual(g.u16('hist_n'), 256, 'crash evicted a history entry')

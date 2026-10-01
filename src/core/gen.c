@@ -460,6 +460,24 @@ static void tidy(Level *L, uint8_t focus)
         }
         *L = cand;
     }
+    /* Gates left without a switch can never change: show them as what they are (a
+     * wall, or floor) instead of as a door that never opens or a barrier that isn't.
+     * The switch state stays 0 forever, so this can't change any solution. */
+    for (i = GW + 1; i < GN - GW - 1; i++)
+        if (L->cell[i] == T_SWITCH) break;
+    if (i == GN - GW - 1) {
+        for (i = GW + 1; i < GN - GW - 1; i++) {
+            if (L->cell[i] == T_GATE_A) L->cell[i] = T_WALL;
+            else if (L->cell[i] == T_GATE_B) L->cell[i] = T_FLOOR;
+        }
+    }
+    /* A router facing a wall stops you on its cell from any side: it is a stop pad in
+     * disguise (it can arise from a frozen gate), so show it as one. Same solutions. */
+    for (i = GW + 1; i < GN - GW - 1; i++) {
+        t = L->cell[i];
+        if (t >= T_ARROW_U && t <= T_ARROW_L && L->cell[(uint8_t)(i + dir_dpos[t - T_ARROW_U])] == T_WALL)
+            L->cell[i] = T_STOP;
+    }
     /* what is left on the board */
     L->mechs = (uint8_t)(L->nchips ? MBIT(M_CHIP) : 0);
     for (i = GW + 1; i < GN - GW - 1; i++) {
