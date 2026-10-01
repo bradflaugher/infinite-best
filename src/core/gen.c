@@ -431,15 +431,21 @@ static uint8_t tile_mech(uint8_t t)
  * one solve; it stops at the budget. */
 static void tidy(Level *L, uint8_t focus)
 {
-    uint8_t i, t, o, role = ROLE_IDLE;
+    uint8_t i, t, o, role = ROLE_IDLE, switches = 0;
     uint16_t end = (uint16_t)(gen_cost + GEN_TIDY_COST);
     if (end > GEN_TIDY_BUDGET) end = GEN_TIDY_BUDGET;
-    if (focus != 0xFF) role = mech_role(L, focus);
+    if (gen_cost >= end) end = 0;   /* no budget left: tidy nothing (not even mech_role) */
+    if (focus != 0xFF && end) role = mech_role(L, focus);
+    for (i = GW + 1; i < GN - GW - 1; i++)
+        if (L->cell[i] == T_SWITCH) switches++;
     for (i = GW + 1; i < GN - GW - 1 && gen_cost < end; i++) {
         t = L->cell[i];
         if (t != T_STOP && t < T_ARROW_U) continue;
         /* a focus mechanic that ended up idle (out of budget) still stays on show */
         if (!role && tile_mech(t) == focus) continue;
+        /* the last switch of focus gates stays: without it they would freeze into plain
+         * walls and floor (below) and the sector would lose the idea it is about */
+        if (t == T_SWITCH && focus == M_GATE && switches == 1) continue;
         cand = *L;
         cand.cell[i] = T_FLOOR;
         if (t == T_PORTAL) {
@@ -453,11 +459,17 @@ static void tidy(Level *L, uint8_t focus)
         /* stripping the focus mechanic gives the same board either way, so only other
          * tiles can change its role, except that a gate's USED also depends on the
          * other gates (with the switch stripped they are frozen as they start) */
-        if (role && tile_mech(t) != focus && mech_role(&cand, focus) < role) continue;
+        /* (each extra check is a solve: stop at the budget rather than overshoot it) */
+        if (role && tile_mech(t) != focus) {
+            if (gen_cost >= end) break;
+            if (mech_role(&cand, focus) < role) continue;
+        }
         if (role == ROLE_USED && tile_mech(t) == M_GATE && focus == M_GATE) {
+            if (gen_cost >= end) break;
             strip_mech(&variant, &cand, STRIP_SWITCH);
             if (solve_vs(&variant, L) != SOLVE_NONE) continue;
         }
+        if (t == T_SWITCH) switches--;
         *L = cand;
     }
     /* Gates left without a switch can never change: show them as what they are (a

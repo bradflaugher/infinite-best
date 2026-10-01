@@ -483,6 +483,27 @@ static void test_boards_are_tidy(void)
     CHECK_EQ(lesson_idle, 0);
 }
 
+/* The gate lesson and the sectors that reinforce it (14-17) always keep their gates
+ * and a switch: tidy used to strip the last switch off boards where the gates only
+ * blocked a shortcut, and the gates then froze into plain walls. */
+static void test_gate_sectors_keep_gates(void)
+{
+    Level L;
+    uint16_t seed, sector;
+    int lost = 0;
+    for (seed = 0; seed < 600; seed++) {
+        for (sector = UNLOCK_GATE; sector < UNLOCK_GATE + 4; sector++) {
+            gen_level(&L, (uint16_t)(seed * 977u + 13u), sector, 0);
+            lost += !(L.mechs & MBIT(M_GATE));
+        }
+    }
+    /* the reported seeds, including three gate lessons that came out gate-free */
+    gen_level(&L, 17800, 14, 0); CHECK(L.mechs & MBIT(M_GATE));
+    gen_level(&L, 29932, 14, 0); CHECK(L.mechs & MBIT(M_GATE));
+    gen_level(&L, 35240, 15, 0); CHECK(L.mechs & MBIT(M_GATE));
+    CHECK_EQ(lost, 0);
+}
+
 /* solve_limit cuts the search off: a board that needs more moves reads unsolvable */
 static void test_solve_limit(void)
 {
@@ -638,6 +659,7 @@ int main(void)
     test_mechanics_matter();
     test_lessons_use_the_mechanic();
     test_boards_are_tidy();
+    test_gate_sectors_keep_gates();
     test_solve_limit();
     test_difficulty_curve();
     test_endless_curve();

@@ -70,7 +70,7 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 | --- | --- |
 | D-pad | Slide |
 | **B** (hold) | Rewind, free, up to 256 moves back (energy already spent stays spent) |
-| **SELECT** | Hint: the optimal next move and how many moves remain. In RUN it costs 3 energy and breaks your BEST streak. Asking again for the same position is free, and so is a hint that finds no way out |
+| **SELECT** | Hint: the optimal next move and how many moves remain. In RUN it costs 3 energy and breaks your BEST streak. Asking again while the arrow is still showing is free, and so is a hint that finds no way out |
 | **START** | Pause: resume · restart · hint/skip · quit (abandoning a RUN asks you to confirm) |
 
 ### Modes
