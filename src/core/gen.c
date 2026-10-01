@@ -9,9 +9,16 @@ const uint8_t mech_unlock[NUM_MECH] = {
     UNLOCK_STOP, UNLOCK_CHIP, UNLOCK_PIT, UNLOCK_ARROW, UNLOCK_GATE, UNLOCK_PORTAL
 };
 
-/* Reinforcement sectors ask the newest mechanic to matter for this many attempts,
- * then settle for any in-window board (bounds the extra solves). Teaching sectors
- * always insist. */
+/* What a mechanic does for a board's solution (see mech_role): ROLE_IDLE (par is the
+ * same without it), ROLE_BLOCKS (par changes, e.g. it only closes a shortcut) or
+ * ROLE_USED (every optimal solution goes through it). */
+#define ROLE_IDLE 0
+#define ROLE_BLOCKS 1
+#define ROLE_USED 2
+
+/* Teaching sectors insist that the new mechanic is USED (until the budget runs out,
+ * then that it at least BLOCKS). Reinforcement sectors ask for USED for this many
+ * rolls / climb steps, then for BLOCKS (which bounds the extra solves). */
 #define GEN_FOCUS_ATTEMPTS 12
 
 static Level cand;
@@ -128,9 +135,23 @@ static void place(Level *L, uint8_t t, uint8_t count)
     }
 }
 
+/* A router that points straight into a wall is just a stop pad in disguise (and on
+ * its teaching sector a confusing one): turn it until it points somewhere open. */
+static void aim_routers(Level *L)
+{
+    uint8_t i, t, k;
+    for (i = GW + 1; i < GN - GW - 1; i++) {
+        t = L->cell[i];
+        if (t < T_ARROW_U || t > T_ARROW_L) continue;
+        for (k = 0; k < 3 && L->cell[(uint8_t)(i + dir_dpos[t - T_ARROW_U])] == T_WALL; k++)
+            t = (uint8_t)(T_ARROW_U + ((t - T_ARROW_U + 1) & 3));
+        L->cell[i] = t;
+    }
+}
+
 static void build(Level *L, const GenParams *p, uint16_t sector)
 {
-    uint8_t n, i, c, d, len, x, y;
+    uint8_t n, i, c, d, len, x, y, exit_pos;
     uint8_t mech = p->mechs;
 
     level_clear(L);
@@ -154,8 +175,8 @@ static void build(Level *L, const GenParams *p, uint16_t sector)
     }
 
     L->start = pick_floor(L);
-    c = pick_floor(L);
-    L->cell[c] = T_EXIT;
+    exit_pos = pick_floor(L);
+    L->cell[exit_pos] = T_EXIT;
 
     if (mech & MBIT(M_CHIP)) {
         /* 1-2 chips early, 1-3 later, 2-3 deep in (collection order is a puzzle too) */
@@ -169,7 +190,20 @@ static void build(Level *L, const GenParams *p, uint16_t sector)
     }
     if (mech & MBIT(M_STOP)) place(L, T_STOP, (uint8_t)(1 + rng_range(3)));
     /* pits and routers rarely matter by chance: the focus mechanic gets one more */
-    if (mech & MBIT(M_PIT)) place(L, T_PIT, (uint8_t)(2 + (p->focus == M_PIT) + rng_range(4)));
+    if (mech & MBIT(M_PIT)) {
+        if (p->focus == M_PIT) {
+            /* ...and when pits are the lesson, one sits just off the exit and one
+             * a few cells out from the start */
+            c = (uint8_t)(exit_pos + dir_dpos[rng_range(4)]);
+            if (L->cell[c] == T_FLOOR && c != L->start) L->cell[c] = T_PIT;
+            d = rng_range(4);
+            c = L->start;
+            for (i = (uint8_t)(1 + rng_range(4)); i && L->cell[(uint8_t)(c + dir_dpos[d])] == T_FLOOR; i--)
+                c = (uint8_t)(c + dir_dpos[d]);
+            if (c != L->start) L->cell[c] = T_PIT;
+        }
+        place(L, T_PIT, (uint8_t)(2 + (p->focus == M_PIT) + rng_range(4)));
+    }
     if (mech & MBIT(M_ARROW)) {
         n = (uint8_t)(1 + (p->focus == M_ARROW) + rng_range(3));
         while (n--) place(L, (uint8_t)(T_ARROW_U + rng_range(4)), 1);
@@ -177,6 +211,11 @@ static void build(Level *L, const GenParams *p, uint16_t sector)
     if (mech & MBIT(M_GATE)) {
         place(L, T_SWITCH, 1);
         if (rng_range(3) == 0) place(L, T_SWITCH, 1);
+        if (p->focus == M_GATE) {
+            /* the lesson: a gate guards the exit, so the way in usually needs the switch */
+            c = (uint8_t)(exit_pos + dir_dpos[rng_range(4)]);
+            if (L->cell[c] == T_FLOOR && c != L->start) L->cell[c] = T_GATE_A;
+        }
         place(L, T_GATE_A, (uint8_t)(2 + rng_range(3)));
         place(L, T_GATE_B, (uint8_t)(1 + rng_range(3)));
     }
@@ -190,9 +229,12 @@ static void build(Level *L, const GenParams *p, uint16_t sector)
             else { L->cell[L->portal[0]] = T_FLOOR; L->portal[0] = NO_POS; }
         }
     }
+    aim_routers(L);
 }
 
-/* Remove a mechanic from a copy of the level (turn its tiles into floor). */
+/* Remove a mechanic from a copy of the level (turn its tiles into floor).
+ * STRIP_SWITCH removes only the switches, which freezes the gates as they start. */
+#define STRIP_SWITCH NUM_MECH
 static void strip_mech(Level *dst, const Level *src, uint8_t m)
 {
     uint8_t i, t, keep;
@@ -206,21 +248,14 @@ static void strip_mech(Level *dst, const Level *src, uint8_t m)
         case M_ARROW: keep = (uint8_t)(t < T_ARROW_U || t > T_ARROW_L); break;
         case M_GATE: keep = (uint8_t)(t != T_SWITCH && t != T_GATE_A && t != T_GATE_B); break;
         case M_PORTAL: keep = (uint8_t)(t != T_PORTAL); break;
+        case M_CHIP: keep = (uint8_t)!IS_CHIP(t); break;
+        case STRIP_SWITCH: keep = (uint8_t)(t != T_SWITCH); break;
         default: break;
         }
         if (!keep) dst->cell[i] = T_FLOOR;
     }
     if (m == M_PORTAL) { dst->portal[0] = NO_POS; dst->portal[1] = NO_POS; }
-}
-
-/* does the mechanic change the optimal solution? */
-static uint8_t mech_matters(const Level *L, uint8_t m)
-{
-    State s;
-    if (m == M_CHIP) return 1; /* chips always gate the exit */
-    strip_mech(&variant, L, m);
-    state_start(&variant, &s);
-    return (uint8_t)(solve(&variant, &s) != L->par);
+    if (m == M_CHIP) dst->nchips = 0;   /* the exit is online from the start */
 }
 
 static uint8_t window_dist(uint8_t par, const GenParams *p)
@@ -239,28 +274,75 @@ uint32_t gen_work;
 #define COUNT_WORK()
 #endif
 
-/* Solve cand and score it: 0 = in the par window (and, when insist is set, the focus
- * mechanic changes the solution), otherwise the distance to the window. 0xFF = unsolvable.
- * Every solve is charged to gen_cost (states visited + a fixed overhead), which is
- * deterministic, so the search stops at the same point on the host and the Game Boy. */
-static uint8_t evaluate(const GenParams *p, uint8_t insist)
+/* Par of a board from its start. Every solve is charged to gen_cost (states visited
+ * + a fixed overhead), which is deterministic, so the search stops at the same point
+ * on the host and the Game Boy. */
+static uint8_t solve_charged(const Level *L)
 {
     State s;
-    uint8_t par, dist;
-    state_start(&cand, &s);
-    par = solve(&cand, &s);
+    uint8_t par;
+    state_start(L, &s);
+    par = solve(L, &s);
     gen_solves++;
     gen_cost += (uint16_t)(solve_visited + GEN_SOLVE_OVERHEAD);
     COUNT_WORK();
+    return par;
+}
+
+/* Par of a variant of L, or SOLVE_NONE if it takes more than L's par: the checks
+ * below only need to know shorter / same / longer, and stopping at par saves the
+ * deepest (most expensive) part of the search. */
+static uint8_t solve_vs(const Level *X, const Level *L)
+{
+    uint8_t par;
+    solve_limit = L->par;
+    par = solve_charged(X);
+    solve_limit = SOLVE_MAX_DEPTH;
+    return par;
+}
+
+/* The ROLE_* mechanic m plays in L. USED means that without it the board gets longer
+ * or unsolvable, so every optimal solution goes through it: pads, routers and portals
+ * are not solid, so a route that never touches them would work just as well without
+ * them. Gates are USED only when the switch is needed. Pits can only ever block. */
+static uint8_t mech_role(const Level *L, uint8_t m)
+{
+    uint8_t p2;
+    strip_mech(&variant, L, m);
+    p2 = solve_vs(&variant, L);
+    if (p2 == L->par) return ROLE_IDLE;
+    /* chips only ever make the route longer (that's the detour they are for) */
+    if (m == M_CHIP) return ROLE_USED;
+    if (m == M_PIT) return ROLE_BLOCKS;
+    if (m == M_GATE) {
+        strip_mech(&variant, L, STRIP_SWITCH);
+        p2 = solve_vs(&variant, L);
+    }
+    return p2 == SOLVE_NONE ? ROLE_USED : ROLE_BLOCKS; /* longer, or not at all */
+}
+
+/* the strongest role a focus mechanic can be asked for */
+static uint8_t role_want(uint8_t m, uint8_t insist)
+{
+    if (m == M_PIT && insist > ROLE_BLOCKS) return ROLE_BLOCKS;
+    return insist;
+}
+
+/* Solve cand and score it (lower is better, 0 = done, 0xFF = unsolvable): three times
+ * the distance to the par window, or inside the window 0 when the focus mechanic plays
+ * the role insist asks for (ROLE_BLOCKS: it must change par, ROLE_USED: the solution
+ * must go through it), 1 when it only blocks and 2 when it is idle. */
+static uint8_t evaluate(const GenParams *p, uint8_t insist)
+{
+    uint8_t par, dist, want, role;
+    par = solve_charged(&cand);
     if (par == SOLVE_NONE) return 0xFF;
     cand.par = par;
-    dist = window_dist(par, p);
+    dist = (uint8_t)(window_dist(par, p) * 3);
     if (dist == 0 && insist && p->focus != 0xFF) {
-        uint8_t m = mech_matters(&cand, p->focus);
-        gen_solves++;
-        gen_cost += (uint16_t)(solve_visited + GEN_SOLVE_OVERHEAD);
-        COUNT_WORK();
-        if (!m) dist = 1; /* the new idea must actually change the solution */
+        want = role_want(p->focus, insist);
+        role = mech_role(&cand, p->focus);
+        if (role < want) dist = (uint8_t)(2 - role); /* the new idea must earn its place */
     }
     return dist;
 }
@@ -333,6 +415,59 @@ static uint8_t mutate(void)
     return 0;
 }
 
+/* the mechanic a special tile belongs to */
+static uint8_t tile_mech(uint8_t t)
+{
+    if (t == T_STOP) return M_STOP;
+    if (t == T_PIT) return M_PIT;
+    if (t == T_PORTAL) return M_PORTAL;
+    if (t >= T_SWITCH) return M_GATE;
+    return M_ARROW;
+}
+
+/* Clean-up: remove every special tile (pad, pit, router, switch, gate, portal pair)
+ * whose removal leaves par unchanged, so what is left on the board is there for a
+ * reason. A removal must also keep the focus mechanic in the role it had. Each try is
+ * one solve; it stops at the budget. */
+static void tidy(Level *L, uint8_t focus)
+{
+    uint8_t i, t, o, role = ROLE_IDLE;
+    uint16_t end = (uint16_t)(gen_cost + GEN_TIDY_COST);
+    if (end > GEN_TIDY_BUDGET) end = GEN_TIDY_BUDGET;
+    if (focus != 0xFF) role = mech_role(L, focus);
+    for (i = GW + 1; i < GN - GW - 1 && gen_cost < end; i++) {
+        t = L->cell[i];
+        if (t != T_STOP && t < T_ARROW_U) continue;
+        /* a focus mechanic that ended up idle (out of budget) still stays on show */
+        if (!role && tile_mech(t) == focus) continue;
+        cand = *L;
+        cand.cell[i] = T_FLOOR;
+        if (t == T_PORTAL) {
+            o = cand.portal[0] == i ? cand.portal[1] : cand.portal[0];
+            if (o < i) continue;        /* the pair was tried from its first cell */
+            cand.cell[o] = T_FLOOR;
+            cand.portal[0] = NO_POS;
+            cand.portal[1] = NO_POS;
+        }
+        if (solve_vs(&cand, L) != L->par) continue;
+        /* stripping the focus mechanic gives the same board either way, so only other
+         * tiles can change its role, except that a gate's USED also depends on the
+         * other gates (with the switch stripped they are frozen as they start) */
+        if (role && tile_mech(t) != focus && mech_role(&cand, focus) < role) continue;
+        if (role == ROLE_USED && tile_mech(t) == M_GATE && focus == M_GATE) {
+            strip_mech(&variant, &cand, STRIP_SWITCH);
+            if (solve_vs(&variant, L) != SOLVE_NONE) continue;
+        }
+        *L = cand;
+    }
+    /* what is left on the board */
+    L->mechs = (uint8_t)(L->nchips ? MBIT(M_CHIP) : 0);
+    for (i = GW + 1; i < GN - GW - 1; i++) {
+        t = L->cell[i];
+        if (t == T_STOP || t >= T_ARROW_U) L->mechs |= MBIT(tile_mech(t));
+    }
+}
+
 void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(uint8_t attempt)) CORE_BANKED
 {
     GenParams p;
@@ -355,7 +490,8 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
          attempt++) {
         if (progress) progress(step++);
         build(&cand, &p, sector);
-        insist = (uint8_t)(p.featured != 0xFF || attempt < GEN_FOCUS_ATTEMPTS);
+        insist = (uint8_t)(p.featured != 0xFF ? (gen_cost < GEN_BUDGET ? ROLE_USED : ROLE_BLOCKS)
+                           : attempt < GEN_FOCUS_ATTEMPTS ? ROLE_USED : ROLE_BLOCKS);
         dist = evaluate(&p, insist);
         if (dist != 0 && dist != 0xFF && cand.par < p.par_min) {
             /* too shallow: first see how deep this layout can go */
@@ -379,7 +515,7 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
         stall = 0;
         for (attempt = 0; attempt < GEN_CLIMB_STEPS && gen_cost < GEN_BUDGET; attempt++) {
             if (progress) progress(step++);
-            insist = (uint8_t)(p.featured != 0xFF || attempt < GEN_CLIMB_FOCUS_STEPS);
+            insist = (uint8_t)(p.featured != 0xFF || attempt < GEN_CLIMB_FOCUS_STEPS ? ROLE_USED : ROLE_BLOCKS);
             fresh = (uint8_t)(stall >= GEN_CLIMB_STALL);
             if (fresh) {
                 build(&cand, &p, sector);
@@ -387,6 +523,7 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
             } else {
                 cand = cur;
                 if (!mutate()) continue;
+                aim_routers(&cand);
                 /* now and then re-seat the exit at the far end of the new layout */
                 if (cur.par < p.par_min && rng_range(4) == 0) exit_far();
             }
@@ -426,6 +563,7 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
             }
         }
     }
+    if (L->par) tidy(L, p.focus);
     L->attempts = (uint8_t)(gen_solves > 254 ? 254 : gen_solves);
 
     if (L->par == 0) {

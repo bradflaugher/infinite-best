@@ -43,7 +43,7 @@ the deepest a 10×8 board gets within the Game Boy's generation budget. Typical 
 
 | Sector | 10 | 20 | 30 | 40 | 60 | 100 | 150 | 250 | 500+ |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Avg par | 5.4 | 7.6 | 9.4 | 10.4 | 11.2 | 12.9 | 13.0 | 13.4 | 14.0 |
+| Avg par | 5.1 | 7.2 | 9.2 | 10.9 | 11.7 | 12.6 | 12.5 | 13.4 | 13.8 |
 
 (Before the hill-climb, par flattened at ~9.8 from sector 36 on.)
 
@@ -82,21 +82,58 @@ Then `src/core/solver.c` runs a breadth-first search over the full state space
 3. **Budget.** Every solve is charged its visited states plus a fixed overhead
    (`gen_cost`). The search stops at `GEN_BUDGET` and keeps the closest board so far. The
    count is deterministic, so it stops at the same point on the host and the Game Boy.
+4. **Clean-up.** Each pad, pit, router, switch, gate and portal pair is taken off in turn,
+   and stays off if par is unchanged (and the focus mechanic keeps its role). This costs one
+   solve per tile, capped at `GEN_TIDY_COST` and `GEN_TIDY_BUDGET`. Before it, about 70% of
+   special tiles were clutter that changed nothing; after it 8-18% on sectors 22-100 and
+   30% deeper in, where the climb has often used up the budget.
 
-- On a teaching sector, the new mechanic must *matter*. The generator strips it out
-  and re-solves, and the level is rejected if the par doesn't change.
-- Until sector 22, the sectors between lessons keep the newest mechanic on and ask it to
-  matter too (for the first 12 rolls and 32 climb steps, which bounds the extra solving).
-  Without this, the stop pads, routers, gates and portals were decoration on 40-80% of
-  those boards. Pits and routers, which rarely matter by chance, get one extra tile when
-  they are the focus.
-- About 87% of sectors land inside their window, and the rest are usually within one move
+- On a teaching sector, the new mechanic must be *used*. The generator strips it out and
+  re-solves, and keeps the level only if that makes it longer or unsolvable. Pads, routers
+  and portals aren't solid, so then every optimal solution goes through them. The gate
+  lesson has to need its switch (strip just the switches), the chip lesson a detour (open
+  the exit from the start), and pits, which can only get in the way, must change par. Before
+  this, the solution ignored the new tile on 40-60% of lessons and 90% of gate lessons
+  never needed the switch: the new tile was only an obstacle. Once the budget is spent a
+  lesson settles for a mechanic that changes par.
+- Until sector 22, the sectors between lessons keep the newest mechanic on and ask the
+  solution to use it too (for the first 12 rolls and 32 climb steps), then settle for it
+  changing par. Without this, the stop pads, routers, gates and portals were decoration on
+  40-80% of those boards. Pits and routers, which rarely matter by chance, get one extra
+  tile when they are the focus. On a pit lesson one pit sits beside the exit and one a few
+  cells out from the start. On a gate lesson a gate guards the exit.
+- A router never points straight into a wall (that is just a stop pad in disguise).
+- About 86% of sectors land inside their window, and the rest are usually within one move
   of it. If nothing solvable turns up at all, a simplified search runs, and a hand-made
   fallback guarantees the game can never soft-lock (it has never triggered in testing).
   `build/ibgen stats` prints all of this per sector.
 
 The generator is deterministic. The same seed gives the same sector on the host and on
 the Game Boy, and CI checks this byte-for-byte.
+
+### Measuring puzzle quality
+
+Par is a weak proxy for a good puzzle, so `build/ibgen quality <seeds> <sectors>` explores
+each board's whole state graph on the host (`tools/quality.h`) and averages, per sector band:
+how many first moves are optimal, how many distinct optimal solutions there are, the chance
+that random play stumbles into a BEST, whether a naive player who always slides towards the
+nearest chip or the exit gets par, dead-end states, and which special tiles and walls are
+idle (removing one leaves par unchanged). `build/ibgen q <seed> <sector>` shows one board
+with its numbers. Over 30 seeds:
+
+| Sectors | 3-10 | 11-21 | 22-35 | 36-100 | 101-300 |
+| --- | --- | --- | --- | --- | --- |
+| Single optimal first move | 90% | 92% | 89% | 88% | 88% |
+| Optimal solutions (avg) | 1.1 | 1.2 | 1.3 | 1.4 | 1.5 |
+| Naive play gets par | 55% | 26% | 17% | 11% | 8% |
+| Idle special tiles, before clean-up | 77% | 76% | 74% | 66% | 64% |
+| Idle special tiles, after | 30% | 37% | 8% | 18% | 30% |
+
+Most boards already have one way in and one solution, so the lever that mattered was
+clutter and lessons. Removing idle *walls* as well was tried and dropped: boards got
+barren, and boards with a single optimal first move fell from about 90% to 77-86%.
+Rejecting boards the naive player solves was tried too: it barely moved the numbers
+(55% to 47% on sectors 3-10) for extra solving, since early pars are only 2-5 moves.
 
 ### Speed on a 4 MHz CPU
 
@@ -105,9 +142,9 @@ The BFS inner loop, one slide across the board, is hand-written SM83 assembly
 stored with a wall border (12×10) so the slide needs no bounds checks, divisions or
 multiplications. One solve costs about 0.4 frames plus 0.075 frames per state visited on a
 DMG, so the budget works out at about 200 frames. The budget is checked between solves and one deep solve
-can overshoot it: the worst seen over 100,000 sectors was 259 frames (4.3 s), and fewer than 1 in
-1,000 take over 3.8 s. Typical sectors take 0.2-1.5 s
-on an original Game Boy and about half that in Game Boy Color double-speed mode. The time runs
+can overshoot it: the worst seen over 180,000 sectors was 270 frames (4.5 s), and fewer than 1 in
+1,000 take over 3.8 s. Typical sectors take 0.7-3.5 s (median 1.9 s, the first 100 sectors
+average 1.4 s) on an original Game Boy and about half that in Game Boy Color double-speed mode. The time runs
 while the clear banner is up, under a "COMPILING" progress bar. The bar is drawn from the VBlank
 interrupt, so it keeps filling (and a highlight keeps running along it) even while the CPU is
 deep inside one solve. A long compile
