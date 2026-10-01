@@ -512,7 +512,7 @@ def gen(data):
     H.append('/* DMG palettes: inverted so index 0 = black, 3 = white */')
     H.append('#define DMG_BGP 0x1B')
     H.append('#define DMG_OBP0 0x1B')
-    H.append('#define DMG_OBP1 0x4B')
+    H.append('#define DMG_OBP1 0xC4   /* live player: bright face, dark eyes, off the grey walls */')
     H.append('extern const uint8_t mt_cgb_pal[NUM_MT];     /* BG palette per metatile */')
     H.append('extern const uint8_t logo_cgb_attr[LOGO_W*LOGO_H]; /* BG palette per logo cell */')
     H.append('extern const uint16_t bg_cgb_pal[8*4];       /* RGB555: r | g<<5 | b<<10 */')
