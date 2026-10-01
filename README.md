@@ -72,7 +72,7 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 
 | Mode | What it is |
 | --- | --- |
-| **RUN** | Roguelike. You start with 30 ⚡ and each move costs 1. A clear refunds its par, and a BEST adds +2 plus your streak. Reach zero and the run ends. Your furthest sector is the record. |
+| **RUN** | Roguelike. You start with 40 ⚡ (max 60) and each move costs 1. A clear refunds its par, and a BEST adds +1, rising to +2 on a 3-BEST streak and +3 on a 6-streak. Every wasted move is a real loss, so reach zero and the run ends. Your furthest sector is the record. |
 | **ZEN** | Endless and calm. No energy, free hints, skip any sector. Your sector is saved. |
 | **SEED** | Start a RUN from a seed you type in (the pause and game-over screens show the current one). |
 | **CODEX** | The rules and the HUD icons, plus a field guide that fills in as you discover mechanics. |

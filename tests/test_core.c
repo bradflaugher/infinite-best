@@ -450,8 +450,8 @@ static void test_run_economy(void)
     CHECK_EQ(run_grade(3, 3), GRADE_BEST);
     CHECK_EQ(run_grade(5, 3), GRADE_GOOD);
     CHECK_EQ(run_grade(6, 3), GRADE_OK);
-    gain = run_on_win(&r, 3);                 /* par clear: par + bonus + streak(1) */
-    CHECK_EQ(gain, 3 + RUN_BEST_BONUS + 1);
+    gain = run_on_win(&r, 3);                 /* par clear: par + BEST bonus */
+    CHECK_EQ(gain, 3 + RUN_BEST_BONUS);
     CHECK_EQ(r.streak, 1);
     CHECK_EQ(r.sector, 2);
     CHECK_EQ(r.moves, 0);
@@ -463,10 +463,22 @@ static void test_run_economy(void)
     CHECK_EQ(r.bests, 1);
     CHECK_EQ(r.cleared, 2);
     /* energy cap */
-    r.energy = 98;
+    r.energy = RUN_MAX_ENERGY - 1;
     r.moves = 1;
     run_on_win(&r, 9);
     CHECK_EQ(r.energy, RUN_MAX_ENERGY);
+    /* the streak bonus steps up every RUN_STREAK_STEP BESTs, then stops */
+    CHECK_EQ(run_best_bonus(1), 1);
+    CHECK_EQ(run_best_bonus(2), 1);
+    CHECK_EQ(run_best_bonus(3), 2);
+    CHECK_EQ(run_best_bonus(5), 2);
+    CHECK_EQ(run_best_bonus(6), 3);
+    CHECK_EQ(run_best_bonus(200), 3);
+    /* a BEST nets +bonus over the moves spent; one move over par nets -1 */
+    r.energy = 20; r.streak = 0; r.moves = 5;
+    CHECK_EQ(run_on_win(&r, 5), 5 + 1);
+    r.moves = 6;
+    CHECK_EQ(run_on_win(&r, 5), 5);
     /* hints */
     r.energy = RUN_HINT_COST;
     CHECK(!run_try_hint(&r));

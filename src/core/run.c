@@ -34,6 +34,12 @@ uint8_t run_grade(uint8_t moves, uint8_t par)
     return GRADE_OK;
 }
 
+uint8_t run_best_bonus(uint8_t streak)
+{
+    uint8_t extra = (uint8_t)(streak / RUN_STREAK_STEP);
+    return (uint8_t)(RUN_BEST_BONUS + (extra < RUN_STREAK_MAX ? extra : RUN_STREAK_MAX));
+}
+
 uint8_t run_on_win(Run *r, uint8_t par)
 {
     uint8_t gain = 0;
@@ -50,7 +56,7 @@ uint8_t run_on_win(Run *r, uint8_t par)
     if (r->mode == MODE_RUN) {
         gain = par;
         if (g == GRADE_BEST)
-            gain = (uint8_t)(gain + RUN_BEST_BONUS + (r->streak < RUN_STREAK_CAP ? r->streak : RUN_STREAK_CAP));
+            gain = (uint8_t)(gain + run_best_bonus(r->streak));
         e = (uint16_t)r->energy + gain;
         if (e > RUN_MAX_ENERGY) e = RUN_MAX_ENERGY;
         gain = (uint8_t)(e - r->energy);
