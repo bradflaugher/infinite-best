@@ -20,6 +20,13 @@ const uint8_t mech_unlock[NUM_MECH] = {
  * then that it at least BLOCKS). Reinforcement sectors ask for USED for this many
  * rolls / climb steps, then for BLOCKS (which bounds the extra solves). */
 #define GEN_FOCUS_ATTEMPTS 12
+/* Freeform sectors pick one of their mechanics as focus too: it is asked to be USED on
+ * the first few rolls and to change par after that, until half the budget is gone.
+ * From then on the search settles for the closest in-window board it has (only its
+ * focus fell short), since going on would just accept the next in-window board. */
+#define GEN_FREE_USED_ROLLS 4
+#define GEN_FREE_SETTLE (GEN_BUDGET / 2)
+#define FREE_SETTLE() (freeform && gen_cost >= GEN_FREE_SETTLE && best_dist < 3)
 
 static Level cand;
 static Level cur;      /* the board the hill-climb is standing on */
@@ -46,6 +53,17 @@ static uint8_t popcount8(uint8_t v)
     uint8_t c = 0;
     while (v) { c += (uint8_t)(v & 1u); v >>= 1; }
     return c;
+}
+
+/* a random mechanic out of the set bits of mask (0xFF if none) */
+static uint8_t pick_mech(uint8_t mask)
+{
+    uint8_t m, k = popcount8(mask);
+    if (!k) return 0xFF;
+    k = rng_range(k);
+    for (m = 0; m < NUM_MECH; m++)
+        if ((mask & MBIT(m)) && !k--) return m;
+    return 0xFF;
 }
 
 void gen_params(uint16_t sector, GenParams *p) CORE_BANKED
@@ -84,9 +102,14 @@ void gen_params(uint16_t sector, GenParams *p) CORE_BANKED
         /* breather */
         if (pmin > 3) pmin -= (uint8_t)(pmin >= 12 ? 3 : 2);
         if (pmax > pmin + 2) pmax = (uint8_t)(pmin + 2);
-        p->mechs = 0;
-        for (m = 0; m < NUM_MECH; m++)
-            if ((unlocked & MBIT(m)) && rng_range(3) == 0) p->mechs |= MBIT(m);
+        /* one idea shown off on a small board (with chips now and then): a breather
+         * is a rest, not a blank page. Gates double the state space, so they are left
+         * out when there is a choice. */
+        m = (uint8_t)(unlocked & ~MBIT(M_CHIP));
+        if (m & ~MBIT(M_GATE)) m &= (uint8_t)~MBIT(M_GATE);
+        p->focus = pick_mech(m);
+        if (p->focus != 0xFF) p->mechs = MBIT(p->focus);
+        if ((unlocked & MBIT(M_CHIP)) && rng_range(3) == 0) p->mechs |= MBIT(M_CHIP);
     } else if (sector < FREEFORM_SECTOR) {
         /* most recent mechanic stays on, older ones come and go */
         for (m = 0; m < NUM_MECH; m++) {
@@ -102,6 +125,9 @@ void gen_params(uint16_t sector, GenParams *p) CORE_BANKED
         uint8_t guard = 0;
         while (popcount8(p->mechs) < want && guard++ < 40)
             p->mechs |= MBIT(rng_range(NUM_MECH));
+        /* one of them (not chips, which always matter) has to earn its place, or the
+         * clean-up leaves a walls-only maze on a quarter of these boards */
+        p->focus = pick_mech((uint8_t)(p->mechs & ~MBIT(M_CHIP)));
     }
     p->par_min = pmin;
     p->par_max = pmax;
@@ -153,6 +179,9 @@ static void build(Level *L, const GenParams *p, uint16_t sector)
 {
     uint8_t n, i, c, d, len, x, y, exit_pos;
     uint8_t mech = p->mechs;
+    /* the extra tiles and placement hints are for lessons and the sectors that
+     * reinforce them; past sector 21 they would crowd boards and cost depth */
+    uint8_t focus = (uint8_t)(p->featured == 0xFF && sector >= FREEFORM_SECTOR ? 0xFF : p->focus);
 
     level_clear(L);
     L->sector = sector;
@@ -191,7 +220,7 @@ static void build(Level *L, const GenParams *p, uint16_t sector)
     if (mech & MBIT(M_STOP)) place(L, T_STOP, (uint8_t)(1 + rng_range(3)));
     /* pits and routers rarely matter by chance: the focus mechanic gets one more */
     if (mech & MBIT(M_PIT)) {
-        if (p->focus == M_PIT) {
+        if (focus == M_PIT) {
             /* ...and when pits are the lesson, one sits just off the exit and one
              * a few cells out from the start */
             c = (uint8_t)(exit_pos + dir_dpos[rng_range(4)]);
@@ -202,16 +231,16 @@ static void build(Level *L, const GenParams *p, uint16_t sector)
                 c = (uint8_t)(c + dir_dpos[d]);
             if (c != L->start) L->cell[c] = T_PIT;
         }
-        place(L, T_PIT, (uint8_t)(2 + (p->focus == M_PIT) + rng_range(4)));
+        place(L, T_PIT, (uint8_t)(2 + (focus == M_PIT) + rng_range(4)));
     }
     if (mech & MBIT(M_ARROW)) {
-        n = (uint8_t)(1 + (p->focus == M_ARROW) + rng_range(3));
+        n = (uint8_t)(1 + (focus == M_ARROW) + rng_range(3));
         while (n--) place(L, (uint8_t)(T_ARROW_U + rng_range(4)), 1);
     }
     if (mech & MBIT(M_GATE)) {
         place(L, T_SWITCH, 1);
         if (rng_range(3) == 0) place(L, T_SWITCH, 1);
-        if (p->focus == M_GATE) {
+        if (focus == M_GATE) {
             /* the lesson: a gate guards the exit, so the way in usually needs the switch */
             c = (uint8_t)(exit_pos + dir_dpos[rng_range(4)]);
             if (L->cell[c] == T_FLOOR && c != L->start) L->cell[c] = T_GATE_A;
@@ -502,10 +531,12 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
 {
     GenParams p;
     State s;
-    uint8_t attempt, dist, best_dist = 0xFF, cur_dist, insist, limit, stall, fresh, step = 0;
+    uint8_t attempt, dist, best_dist = 0xFF, cur_dist, insist, limit, stall, fresh, step = 0, freeform;
 
-    rng_seed(rng_mix(run_seed, sector));
+    rng_seed2(run_seed, sector);
     gen_params(sector, &p);
+    /* freeform sectors (not breathers) ask less of their focus, see free_insist */
+    freeform = (uint8_t)(p.featured == 0xFF && sector >= FREEFORM_SECTOR && sector % 7);
     L->par = 0;
     gen_solves = 0;
     gen_cost = 0;
@@ -516,11 +547,13 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
     /* (keep rolling past the limit until something is solvable to climb from; teaching
      * sectors are small and must land, so they get all their rolls regardless of budget) */
     for (attempt = 0; (attempt < limit || !L->par) && attempt < (limit > GEN_MAX_ATTEMPTS ? limit : GEN_MAX_ATTEMPTS)
-         && (p.featured != 0xFF || gen_cost < GEN_BUDGET);
+         && (p.featured != 0xFF || gen_cost < GEN_BUDGET) && !FREE_SETTLE();
          attempt++) {
         if (progress) progress(step++);
         build(&cand, &p, sector);
         insist = (uint8_t)(p.featured != 0xFF ? (gen_cost < GEN_BUDGET ? ROLE_USED : ROLE_BLOCKS)
+                           : freeform ? (gen_cost >= GEN_FREE_SETTLE ? 0
+                                         : attempt < GEN_FREE_USED_ROLLS ? ROLE_USED : ROLE_BLOCKS)
                            : attempt < GEN_FOCUS_ATTEMPTS ? ROLE_USED : ROLE_BLOCKS);
         dist = evaluate(&p, insist);
         if (dist != 0 && dist != 0xFF && cand.par < p.par_min) {
@@ -543,9 +576,11 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
         cur = *L;
         cur_dist = best_dist;
         stall = 0;
-        for (attempt = 0; attempt < GEN_CLIMB_STEPS && gen_cost < GEN_BUDGET; attempt++) {
+        for (attempt = 0; attempt < GEN_CLIMB_STEPS && gen_cost < GEN_BUDGET && !FREE_SETTLE(); attempt++) {
             if (progress) progress(step++);
-            insist = (uint8_t)(p.featured != 0xFF || attempt < GEN_CLIMB_FOCUS_STEPS ? ROLE_USED : ROLE_BLOCKS);
+            /* (a deep freeform climb has enough to do reaching the window) */
+            insist = (uint8_t)(freeform ? (gen_cost >= GEN_FREE_SETTLE || p.par_min >= GEN_DEEP_PAR ? 0 : ROLE_BLOCKS)
+                               : p.featured != 0xFF || attempt < GEN_CLIMB_FOCUS_STEPS ? ROLE_USED : ROLE_BLOCKS);
             fresh = (uint8_t)(stall >= GEN_CLIMB_STALL);
             if (fresh) {
                 build(&cand, &p, sector);
@@ -593,7 +628,8 @@ void gen_level(Level *L, uint16_t run_seed, uint16_t sector, void (*progress)(ui
             }
         }
     }
-    if (L->par) tidy(L, p.focus);
+    /* a freeform focus that ended up idle is clutter like any other tile */
+    if (L->par) tidy(L, freeform ? 0xFF : p.focus);
     L->attempts = (uint8_t)(gen_solves > 254 ? 254 : gen_solves);
 
     if (L->par == 0) {

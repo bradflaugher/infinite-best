@@ -22,7 +22,7 @@
 #define GEN_BUDGET 2600         /* ~200 frames on a DMG, ~100 on a Color */
 #define GEN_TEACH_ATTEMPTS 96   /* teaching sectors roll longer (and ignore GEN_BUDGET) */
 #define GEN_TIDY_COST 800       /* the clean-up pass spends at most this much... */
-#define GEN_TIDY_BUDGET 2700    /* ...and stops here (GEN_BUDGET plus a little) */
+#define GEN_TIDY_BUDGET 2900    /* ...and stops here (GEN_BUDGET plus a little) */
 
 typedef struct {
     uint8_t par_min;

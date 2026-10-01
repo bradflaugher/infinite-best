@@ -94,7 +94,7 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 | 11 | Router | Bends your slide. Two routers facing each other cause a `STACK OVERFLOW`. |
 | 14 | Toggle gates | A switch flips which gate colour is solid, even mid-slide. |
 | 18 | Portal | Warps you to its twin, keeping your momentum. |
-| 22+ | Everything | Sectors mix 2-4 mechanics (3-5 from 80), and par keeps climbing for hundreds of sectors. Every 7th sector is a breather. |
+| 22+ | Everything | Sectors mix 2-4 mechanics (3-5 from 80), at least one of which the solution needs, and par keeps climbing for hundreds of sectors. Every 7th sector is a breather built around one idea. |
 
 <p align="center">
   <img src="docs/screens/pause.png" width="240" alt="Pause menu">
@@ -119,11 +119,13 @@ CGB-enhanced: colour and double speed on Color hardware, fully playable on an or
 - **Speed.** The slide inside the BFS is hand-written assembly over a wall-padded 12×10 grid,
   so it needs no bounds checks, multiplies or divides. It is about 10× faster than the
   compiler's version. Generation runs on a fixed work budget (the same on every machine, so it
-  stays deterministic): typically 0.7–3.5 s on a DMG (median 1.9 s; the first 100 sectors
-  average 1.4 s) and about half that on a Color, and fewer than 1 sector in 1,000 takes over
+  stays deterministic): typically 1–3.7 s on a DMG (median 2.2 s; the first 100 sectors
+  average 1.7 s) and about half that on a Color, and fewer than 1 sector in 1,000 takes over
   4 s. It runs while the clear banner is up.
-- **Determinism.** Everything is fixed-width integer maths on a 16-bit xorshift, so the Game Boy
-  and a PC generate *byte-identical* sectors, and CI checks this.
+- **Determinism.** Everything is fixed-width integer maths on a 32-bit xorshift (two 16-bit
+  words, seeded per sector through a small Feistel network so every *(seed, sector)* gets its own
+  stream and no run ever replays a board), so the Game Boy and a PC generate *byte-identical*
+  sectors, and CI checks this.
 - **Sound.** A custom 4-channel driver runs from VBlank. It has instruments, arpeggios, vibrato,
   glide, three wavetables, and sfx that borrow channels and give them back cleanly. The songs
   are written in a small tracker notation (`assets/music/songs.py`): *Title* (E minor
@@ -138,7 +140,7 @@ src/core/     portable puzzle core: compiles with SDCC *and* gcc
   solver.*      BFS solver + hints; SM83 asm hot loop, C reference on host
   gen.*         deterministic generator, difficulty curve, teaching sectors
   run.*         RUN/ZEN economy: energy, par grades, streaks
-  rng.*         16-bit xorshift, identical everywhere
+  rng.*         32-bit xorshift on 16-bit words, identical everywhere
 src/gb/       Game Boy front-end
   game.c        title, play loop, win / crash / game over, pause, codex, seeds  [banked]
   gfx.c         drawing, CGB palettes, shake / flash / wave FX, particles       [bank 0]
@@ -184,7 +186,7 @@ build/ibgen q 42 30        # one board with its quality metrics
   - About 1,500 generated sectors, each replayed along the solver's hint chain and required to
     finish in exactly `par` moves.
   - Determinism, teaching sectors (the lesson is used, not just present), the clean-up pass,
-    the difficulty curve, the energy economy, and the RNG's full 65,535 period.
+    the difficulty curve, the energy economy, the RNG (no repeated boards), and gate sectors keeping their gates.
 - **Sound, 570 assertions.** Plays every song and effect against a fake APU and checks the
   register writes. Also covers channel ownership, loops, rewind and muffle, plus a random stress
   test.

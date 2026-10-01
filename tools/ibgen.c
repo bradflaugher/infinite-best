@@ -113,7 +113,7 @@ int main(int argc, char **argv)
                 GenParams p;
                 uint16_t seed = (uint16_t)(s * 7919);
                 gen_level(&L, seed, (uint16_t)sec, 0);
-                rng_seed(rng_mix(seed, (uint16_t)sec));
+                rng_seed2(seed, (uint16_t)sec);
                 gen_params((uint16_t)sec, &p);
                 n++;
                 total_solves += gen_solves;

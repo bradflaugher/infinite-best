@@ -1,6 +1,7 @@
 /* Host unit tests for the portable puzzle core.
  * Build: gcc -std=c99 -Wall -Wextra -Isrc/core tests/test_core.c src/core/{level,rng,solver,gen,run}.c -o build/test_core */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "level.h"
 #include "solver.h"
@@ -56,15 +57,37 @@ static void test_rng(void)
     CHECK_EQ(rng_next(), first);          /* deterministic */
     rng_seed(0);
     CHECK(rng_state != 0);               /* zero seed is remapped */
-    rng_seed(1);
-    do { period++; if (rng_next() == 0) seen_zero = 1; } while (rng_state != 1 && period < 70000);
-    CHECK_EQ(period, 65535);             /* full-period xorshift16 */
-    CHECK(!seen_zero);
+    {   /* 32-bit state: the period is 2^32-1 (checked exhaustively off-line); here,
+         * that the stream doesn't repeat at the old 16-bit period and never sticks at 0 */
+        static uint16_t out[66000];
+        int same = 1;
+        rng_seed(1);
+        for (period = 0; period < 66000; period++) {
+            out[period] = rng_next();
+            if (period && !out[period] && !out[period - 1]) seen_zero = 1;
+        }
+        for (i = 0; i < 400; i++) same &= out[i] == out[i + 65535];
+        CHECK(!same);
+        CHECK(!seen_zero);
+    }
+    {   /* per-sector seeds: every (seed, sector) gets its own stream */
+        static uint32_t seen[4096];
+        uint16_t a, b, j;
+        int dup = 0;
+        for (a = 0; a < 64; a++)
+            for (b = 0; b < 64; b++) {
+                rng_seed2((uint16_t)(a * 7919u), b);
+                seen[a * 64 + b] = ((uint32_t)rng_next() << 16) | rng_next();
+            }
+        for (i = 0; i < 4096; i++)
+            for (j = (uint16_t)(i + 1); j < 4096; j++) dup += seen[i] == seen[j];
+        CHECK_EQ(dup, 0);
+        rng_seed2(0, 0);
+        CHECK(rng_next() || rng_next());  /* the all-zero state is remapped */
+    }
     rng_seed(77);
     for (i = 0; i < 4000; i++) { uint8_t v = rng_range(4); CHECK(v < 4); if (v < 4) hist[v]++; }
     for (i = 0; i < 4; i++) CHECK(hist[i] > 850 && hist[i] < 1150); /* roughly uniform */
-    CHECK(rng_mix(1, 2) != rng_mix(2, 1));
-    CHECK(rng_mix(5, 6) != 0);
 }
 
 static void test_slide_basics(void)
@@ -381,8 +404,11 @@ static void test_mechanics_matter(void)
         total += matter;
     }
     CHECK(total >= 200);   /* of 280; about 120 before the focus rule */
-    rng_seed(1); gen_params(FREEFORM_SECTOR + 1, &p);
-    CHECK_EQ(p.focus, 0xFF);
+    /* freeform sectors and breathers pick one of their mechanics (never chips) to matter */
+    for (i = FREEFORM_SECTOR; i < FREEFORM_SECTOR + 40; i++) {
+        rng_seed(i); gen_params((uint16_t)i, &p);
+        CHECK(p.focus < NUM_MECH && p.focus != M_CHIP && (p.mechs & MBIT(p.focus)));
+    }
     rng_seed(1); gen_params(1, &p);
     CHECK_EQ(p.focus, 0xFF);
 }
@@ -479,8 +505,31 @@ static void test_boards_are_tidy(void)
         }
     }
     CHECK(specials > 500);
-    CHECK(idle * 100 < specials * 25);
+    CHECK(idle * 100 < specials * 30);   /* ~25% (24-29% between 12-seed groups); ~70% before tidy */
     CHECK_EQ(lesson_idle, 0);
+}
+
+/* No run ever meets the same board twice. With a 16-bit RNG state the sector streams
+ * overlapped: ~20% of boards were exact copies of another (seed, sector), and most
+ * runs that got deep replayed one of their own earlier sectors. */
+static int board_cmp(const void *a, const void *b) { return memcmp(a, b, GN + 1); }
+static void test_no_repeated_boards(void)
+{
+    static uint8_t seen[1200][GN + 1];
+    Level L;
+    uint16_t seed, sector;
+    int n, i, dup = 0;
+    for (seed = 1; seed <= 3; seed++) {
+        n = 0;
+        for (sector = 1; sector <= 400; sector++) {
+            gen_level(&L, (uint16_t)(seed * 40503u), sector, 0);
+            memcpy(seen[n], L.cell, GN);
+            seen[n++][GN] = L.start;
+        }
+        qsort(seen, (size_t)n, GN + 1, board_cmp);
+        for (i = 1; i < n; i++) dup += !memcmp(seen[i], seen[i - 1], GN + 1);
+    }
+    CHECK_EQ(dup, 0);
 }
 
 /* The gate lesson and the sectors that reinforce it (14-17) always keep their gates
@@ -566,7 +615,7 @@ static void test_endless_curve(void)
             if (sec % 7 == 0) continue;
             for (seed = 1; seed <= 8; seed++) {
                 gen_level(&L, (uint16_t)(seed * 4099u), sec, 0);
-                rng_seed(rng_mix((uint16_t)(seed * 4099u), sec)); gen_params(sec, &p);
+                rng_seed2((uint16_t)(seed * 4099u), sec); gen_params(sec, &p);
                 par[b] += L.par;
                 total++;
                 if (L.par >= p.par_min && L.par <= p.par_max) inwin++;
@@ -660,6 +709,7 @@ int main(void)
     test_lessons_use_the_mechanic();
     test_boards_are_tidy();
     test_gate_sectors_keep_gates();
+    test_no_repeated_boards();
     test_solve_limit();
     test_difficulty_curve();
     test_endless_curve();

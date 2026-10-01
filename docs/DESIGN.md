@@ -34,8 +34,13 @@ Jonathan Blow school of design:
 | 18 | Portal | Warps you to its twin, keeping your momentum. |
 
 From sector 22 onward, sectors mix 2-4 random mechanics (3-5 from sector 80, with 2-3
-chips from sector 100). Every 7th sector is a shorter "breather", and the three sectors
-before it push one move harder.
+chips from sector 100), and one of them (not chips) is the board's focus: the search asks
+the solution to use it on the first few rolls, then for it to at least change par, until half
+the budget is spent. Every 7th sector is a shorter "breather" built around one mechanic
+(gates only when there's nothing else), sometimes with chips, and the three sectors before
+it push one move harder. Without a focus, the clean-up pass (below) stripped every special
+tile off about a quarter of the boards in sectors 22-35 and up to 80% of the breathers,
+leaving plain wall mazes; now about 10% of sectors 22-35 are walls and chips only.
 
 The par floor rises quickly through the tutorial arc (2 at sector 1, 9 at sector 35) and then
 keeps going, more slowly each time: 12 at sector 95, 13 at 245, 14 from 495 on. The cap is about
@@ -43,7 +48,7 @@ the deepest a 10×8 board gets within the Game Boy's generation budget. Typical 
 
 | Sector | 10 | 20 | 30 | 40 | 60 | 100 | 150 | 250 | 500+ |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Avg par | 5.1 | 7.2 | 9.2 | 10.9 | 11.7 | 12.6 | 12.5 | 13.4 | 13.8 |
+| Avg par | 5.0 | 7.2 | 9.2 | 10.8 | 11.6 | 12.7 | 12.5 | 13.1 | 14.0 |
 
 (Before the hill-climb, par flattened at ~9.8 from sector 36 on.)
 
@@ -103,7 +108,7 @@ Then `src/core/solver.c` runs a breadth-first search over the full state space
   tile when they are the focus. On a pit lesson one pit sits beside the exit and one a few
   cells out from the start. On a gate lesson a gate guards the exit.
 - A router never points straight into a wall (that is just a stop pad in disguise).
-- About 86% of sectors land inside their window, and the rest are usually within one move
+- About 83% of sectors land inside their window (nearly all early ones, fewer deep in), and the rest are usually within one move
   of it. If nothing solvable turns up at all, a simplified search runs, and a hand-made
   fallback guarantees the game can never soft-lock (it has never triggered in testing).
   `build/ibgen stats` prints all of this per sector.
@@ -123,11 +128,11 @@ with its numbers. Over 30 seeds:
 
 | Sectors | 3-10 | 11-21 | 22-35 | 36-100 | 101-300 |
 | --- | --- | --- | --- | --- | --- |
-| Single optimal first move | 90% | 92% | 89% | 88% | 88% |
-| Optimal solutions (avg) | 1.1 | 1.2 | 1.3 | 1.4 | 1.5 |
-| Naive play gets par | 55% | 26% | 17% | 11% | 8% |
+| Single optimal first move | 92% | 92% | 89% | 90% | 87% |
+| Optimal solutions (avg) | 1.1 | 1.2 | 1.3 | 1.4 | 1.6 |
+| Naive play gets par | 57% | 26% | 19% | 11% | 8% |
 | Idle special tiles, before clean-up | 77% | 76% | 74% | 66% | 64% |
-| Idle special tiles, after | 30% | 37% | 8% | 18% | 30% |
+| Idle special tiles, after | 29% | 30% | 7% | 14% | 24% |
 
 Most boards already have one way in and one solution, so the lever that mattered was
 clutter and lessons. Removing idle *walls* as well was tried and dropped: boards got
@@ -142,9 +147,9 @@ The BFS inner loop, one slide across the board, is hand-written SM83 assembly
 stored with a wall border (12×10) so the slide needs no bounds checks, divisions or
 multiplications. One solve costs about 0.4 frames plus 0.075 frames per state visited on a
 DMG, so the budget works out at about 200 frames. The budget is checked between solves and one deep solve
-can overshoot it: the worst seen over 180,000 sectors was 270 frames (4.5 s), and fewer than 1 in
-1,000 take over 3.8 s. Typical sectors take 0.7-3.5 s (median 1.9 s, the first 100 sectors
-average 1.4 s) on an original Game Boy and about half that in Game Boy Color double-speed mode. The time runs
+can overshoot it: the worst seen over 100,000 sectors was about 260 frames (4.3 s), and fewer than
+1 in 1,000 take over 4 s. Typical sectors take 1-3.7 s (median 2.2 s, the first 100 sectors
+average 1.7 s) on an original Game Boy and about half that in Game Boy Color double-speed mode. The time runs
 while the clear banner is up, under a "COMPILING" progress bar. The bar is drawn from the VBlank
 interrupt, so it keeps filling (and a highlight keeps running along it) even while the CPU is
 deep inside one solve. A long compile
