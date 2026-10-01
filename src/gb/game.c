@@ -721,11 +721,11 @@ static void play(void)
         }
         switch (ps) {
         case PS_IDLE:
-            /* From the start it takes par moves and energy never comes back, so with
-             * less energy than par the run is already lost: say so instead of making
-             * the player grind down to zero. */
-            if (run.mode == MODE_RUN && !rewinding && st.pos == level.start && !st.chips
-                && !st.sw && run.energy < level.par) {
+            /* On a fresh start (no history to rewind to) it takes par moves and energy
+             * never comes back, so with less energy than par the run is already lost:
+             * say so instead of making the player grind down to zero. With history, a
+             * rewind can still bring back a state closer to the exit. */
+            if (run.mode == MODE_RUN && !hist_n && run.energy < level.par) {
                 hud_msg("PAR > ENERGY");
                 wait_frames(90);
                 game_over();

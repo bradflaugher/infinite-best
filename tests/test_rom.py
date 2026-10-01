@@ -343,6 +343,29 @@ class RomTest(unittest.TestCase):
         self.assertEqual(g.u8('run', RUN_MOVES), 0)
         self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 600))
 
+    def test_restart_low_energy_can_rewind(self):
+        """After a restart the history still holds later states: no PAR > ENERGY."""
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        par, moves = ibgen('solve', seed, 1)
+        for d in moves[:-1]:                     # stop one move short of the exit
+            g.wait(g.ready, 600)
+            g.move(d)
+        g.wait(g.ready, 300)
+        g.pb.memory[g.addr('run') + RUN_ENERGY] = 1
+        g.press('start', after=10)
+        g.press('down')
+        g.press('a', after=10)                   # RESTART
+        self.assertTrue(g.wait(g.ready, 300))
+        g.run(60)
+        self.assertEqual(g.u8('game_state'), GS_PLAY)
+        self.assertNotIn('PAR > ENERGY', g.win_text())
+        g.press('b', hold=4, after=30)           # undo the restart...
+        self.assertTrue(g.wait(g.ready, 300))
+        g.move(moves[-1])                        # ...and finish with the last energy
+        self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_GEN or g.ps_in(PS_WIN), 600))
+
     def test_energy_equal_to_par_still_plays(self):
         g = self.g
         seed = 0x1D0B

@@ -82,8 +82,17 @@ static void test_rng(void)
         for (i = 0; i < 4096; i++)
             for (j = (uint16_t)(i + 1); j < 4096; j++) dup += seen[i] == seen[j];
         CHECK_EQ(dup, 0);
-        rng_seed2(0, 0);
-        CHECK(rng_next() || rng_next());  /* the all-zero state is remapped */
+        /* the pair that hits the all-zero state is remapped without aliasing another
+         * (it used to share (0, 0xACE1) with seed 0xD00B, sector 0xC02C) */
+        {
+            uint32_t z, other;
+            rng_seed2(0x31D6, 0x9A36);
+            z = ((uint32_t)rng_next() << 16) | rng_next();
+            CHECK(z != 0);
+            rng_seed2(0xD00B, 0xC02C);
+            other = ((uint32_t)rng_next() << 16) | rng_next();
+            CHECK(z != other);
+        }
     }
     rng_seed(77);
     for (i = 0; i < 4000; i++) { uint8_t v = rng_range(4); CHECK(v < 4); if (v < 4) hist[v]++; }

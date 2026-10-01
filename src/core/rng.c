@@ -34,10 +34,7 @@ static uint16_t feistel_f(uint16_t v)
     return (uint16_t)(v ^ (uint16_t)(v >> 7));
 }
 
-/* Seed the full 32-bit state from two 16-bit values through a 4-round Feistel network.
- * That is a bijection, so every (a, b) pair - every (run seed, sector) - gets a state
- * of its own, well mixed. */
-void rng_seed2(uint16_t a, uint16_t b)
+static void feistel(uint16_t a, uint16_t b)
 {
     uint16_t t;
     uint8_t i;
@@ -48,5 +45,15 @@ void rng_seed2(uint16_t a, uint16_t b)
     }
     rng_x = a;
     rng_state = b;
-    if (!a && !b) rng_state = 0xACE1u;   /* the one state xorshift can't leave */
+}
+
+/* Seed the full 32-bit state from two 16-bit values through a 4-round Feistel network.
+ * That is a bijection, so every (a, b) pair - every (run seed, sector) - gets a state
+ * of its own, well mixed. The one pair that maps to all-zero (a state xorshift can't
+ * leave) takes the state of (a, 0) instead: sector 0 is never played, so no pair the
+ * game uses shares it. */
+void rng_seed2(uint16_t a, uint16_t b)
+{
+    feistel(a, b);
+    if (!rng_x && !rng_state) feistel(a, 0);
 }

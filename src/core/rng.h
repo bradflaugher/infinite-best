@@ -4,7 +4,7 @@
 /* 32-bit xorshift over two 16-bit words. Deterministic across SDCC and gcc. */
 extern uint16_t rng_state;
 void rng_seed(uint16_t seed);
-/* seed from two 16-bit values; every pair gets its own state (per-sector streams) */
+/* seed from two 16-bit values; every pair with b != 0 gets its own state (per-sector streams) */
 void rng_seed2(uint16_t a, uint16_t b);
 uint16_t rng_next(void);
 /* uniform-ish value in [0, n) for n >= 1 (n <= 255) */
