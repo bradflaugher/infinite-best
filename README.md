@@ -65,8 +65,8 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 | --- | --- |
 | D-pad | Slide |
 | **B** (hold) | Rewind, free, up to 256 moves back (energy already spent stays spent) |
-| **SELECT** | Hint: the optimal next move and how many moves remain (costs 3 energy in RUN) |
-| **START** | Pause: resume · restart · hint/skip · quit |
+| **SELECT** | Hint: the optimal next move and how many moves remain. In RUN it costs 3 energy and breaks your BEST streak. Asking again for the same position is free, and so is a hint that finds no way out |
+| **START** | Pause: resume · restart · hint/skip · quit (abandoning a RUN asks you to confirm) |
 
 ### Modes
 
@@ -75,7 +75,7 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 | **RUN** | Roguelike. You start with 30 ⚡ and each move costs 1. A clear refunds its par, and a BEST adds +2 plus your streak. Reach zero and the run ends. Your furthest sector is the record. |
 | **ZEN** | Endless and calm. No energy, free hints, skip any sector. Your sector is saved. |
 | **SEED** | Start a RUN from a seed you type in (the pause and game-over screens show the current one). |
-| **CODEX** | The rules, plus a field guide that fills in as you discover mechanics. |
+| **CODEX** | The rules and the HUD icons, plus a field guide that fills in as you discover mechanics. |
 
 ### The rules, in the order you meet them
 
@@ -186,8 +186,9 @@ build/ibgen stats 100 100  # generator statistics over 10,000 sectors
     validates the assembly against the C reference.
   - Plays 20 sectors (every mechanic) using the host's optimal solutions and checks that every
     clear is a BEST.
-  - Tests rewind (state restored, energy not refunded), pause/restart, seed entry, running out
-    of energy, the game-over screen and the codex.
+  - Tests rewind (state restored, energy not refunded, a crash never costs history), pause/restart,
+    the abandon confirm, hint pricing, seed entry, running out of energy, records saved on every
+    clear, number saturation, the game-over screen and the codex.
 
 ### CI and releases
 

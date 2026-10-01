@@ -132,7 +132,7 @@ extern const uint8_t logo_map[LOGO_W*LOGO_H];
 /* DMG palettes: inverted so index 0 = black, 3 = white */
 #define DMG_BGP 0x1B
 #define DMG_OBP0 0x1B
-#define DMG_OBP1 0x4B
+#define DMG_OBP1 0xC4   /* live player: bright face, dark eyes, off the grey walls */
 extern const uint8_t mt_cgb_pal[NUM_MT];     /* BG palette per metatile */
 extern const uint8_t logo_cgb_attr[LOGO_W*LOGO_H]; /* BG palette per logo cell */
 extern const uint16_t bg_cgb_pal[8*4];       /* RGB555: r | g<<5 | b<<10 */

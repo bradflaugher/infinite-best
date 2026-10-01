@@ -31,7 +31,7 @@ uint16_t dbg_gen_frames;    /* frames the last generation took */
 static uint8_t keys, prev_keys, pressed;
 static State hist[256];          /* ring buffer; uint8_t hist_top wraps for free */
 static uint8_t hist_top;
-static uint16_t hist_n;
+uint16_t hist_n;                 /* read by the tests */
 static Path path;
 static State pending;
 static uint8_t pending_r;
@@ -107,7 +107,9 @@ static void player_show(uint8_t base)
     uint8_t x = (uint8_t)(px + 8 - shake_x), y = (uint8_t)(py + 16 - shake_y), i;
     for (i = 0; i < 4; i++) {
         set_sprite_tile(SP_PLAYER + i, (uint8_t)(base + i));
-        set_sprite_prop(SP_PLAYER + i, base == SPR_PLAYER_DEAD ? SPAL_DEAD : SPAL_PLAYER);
+        /* S_PALETTE picks OBP1 on a DMG (CGB ignores it): a brighter ramp, so
+         * the live player stands out from the grey walls; the wreck stays dim */
+        set_sprite_prop(SP_PLAYER + i, base == SPR_PLAYER_DEAD ? SPAL_DEAD : (SPAL_PLAYER | S_PALETTE));
     }
     move_sprite(SP_PLAYER + 0, x, y);
     move_sprite(SP_PLAYER + 1, (uint8_t)(x + 8), y);
@@ -162,7 +164,7 @@ static void hud_msg(const char *s)
 static void hud_numbers(void)
 {
     txt_num(1, 6, 0, level.par, 2, PAL_UI);
-    txt_num(1, 10, 0, run.moves > 99 ? 99 : run.moves, 2,
+    txt_num(1, 10, 0, run.moves, 2,
             run.moves > level.par ? PAL_AMBER : PAL_UI);
     if (run.mode == MODE_RUN) {
         txt_num(1, 14, 0, run.energy, 2, run.energy <= 5 ? PAL_PIT : PAL_UI);
@@ -170,7 +172,7 @@ static void hud_numbers(void)
         put_tile(1, 14, 0, UI_INFINITY_L, PAL_HUD_ACCENT);
         put_tile(1, 15, 0, UI_INFINITY_R, PAL_HUD_ACCENT);
     }
-    txt_num(1, 18, 0, run.streak > 99 ? 99 : run.streak, 2, PAL_UI);
+    txt_num(1, 18, 0, run.streak, 2, PAL_UI);
 }
 
 static void hud_chips(uint8_t chips)
@@ -186,9 +188,12 @@ static void hud_chips(uint8_t chips)
 
 static void hud_draw(void)
 {
+    uint16_t n = run.sector;
     gfill(1, 0, 0, 20, 2, TILE_BLANK, PAL_UI);
     txt(1, 0, 0, "S", PAL_UI);
-    txt_num(1, 1, 0, run.sector > 9999 ? 9999 : run.sector, 4, PAL_UI);
+    /* left-aligned, so below sector 1000 a gap separates it from the par flag
+     * ("S12  >04", not "S0012>04"); txt_num clamps 10000+ to 9999 */
+    txt_num(1, 1, 0, n, (uint8_t)(n < 10 ? 1 : n < 100 ? 2 : n < 1000 ? 3 : 4), PAL_UI);
     put_tile(1, 5, 0, UI_FLAG, PAL_HUD_ACCENT);
     put_tile(1, 9, 0, UI_STEP, PAL_HUD_ACCENT);
     put_tile(1, 13, 0, UI_BOLT, PAL_HUD_ACCENT);
@@ -289,7 +294,7 @@ static void start_level(void)
     music_for_sector();
     if (run.sector == 1) hud_msg("SLIDE TO EXIT");
     else if (run.sector == 2) hud_msg("B: REWIND");
-    else if (run.sector == 3 && level.featured == 0xFF) hud_msg("SELECT: HINT");
+    else if (run.sector == 4) hud_msg("SELECT: HINT");   /* 3 teaches stop pads */
     else hud_msg("");
     msg_temp = 0;       /* tutorial lines stay up until something replaces them */
     buf_dir = 0xFF;
@@ -311,9 +316,8 @@ static void game_over(void)
         /* win() already raises run_best_sector as you go, so compare against
          * the record as it stood when this run began */
         if (reached > save.run_best_sector) save.run_best_sector = reached;
-        record = (uint8_t)(reached > record_at_start);
-        if (run.bests > save.run_best_bests) save.run_best_bests = run.bests;
-        if (run.best_streak > save.run_best_streak) save.run_best_streak = run.best_streak;
+        /* a run that cleared nothing is no record, even on a fresh save */
+        record = (uint8_t)(run.cleared && reached > record_at_start);
     }
     save_write();
 
@@ -380,7 +384,9 @@ static void try_move(uint8_t dir, uint8_t buffered)
     }
     hint_hide();
     if (msg_temp) { hud_msg(""); msg_temp = 0; }
-    hist_push(&st);
+    /* a crash is undone by simply keeping st, so it never enters the history
+     * (pushing then popping it would evict the oldest entry once it's full) */
+    if (r != MV_DEAD && r != MV_LOOP) hist_push(&st);
     run_on_move(&run);
     hud_numbers();
     pending_r = r;
@@ -426,8 +432,7 @@ static void death(void)
         if ((t & 3) == 0) player_show((t & 4) ? SPR_PLAYER_DEAD : SPR_PLAYER_SQUASH);
     }
     fx_wave(0);
-    /* the failed move is undone for free, but the energy is gone */
-    hist_pop(&st);
+    /* the failed move is undone for free (st never took it), but the energy is gone */
     anim_chips = st.chips;
     anim_sw = st.sw;
     draw_dynamic(&level, st.chips, st.sw, exit_anim);
@@ -458,7 +463,12 @@ static void win(void)
     save.lifetime_cleared++;
     if (grade == GRADE_BEST) save.lifetime_bests++;
     if (run.mode == MODE_ZEN) save.zen_sector = run.sector;
-    if (run.mode == MODE_RUN && run.sector > save.run_best_sector) save.run_best_sector = run.sector;
+    if (run.mode == MODE_RUN) {
+        /* every RUN record is saved as it happens, so a power-off mid-run keeps it */
+        if (run.sector > save.run_best_sector) save.run_best_sector = run.sector;
+        if (run.bests > save.run_best_bests) save.run_best_bests = run.bests;
+        if (run.best_streak > save.run_best_streak) save.run_best_streak = run.best_streak;
+    }
     save_write();
 
     for (t = 0; t < 36; t++) {
@@ -476,7 +486,7 @@ static void win(void)
     else if (grade == GRADE_GOOD) txt(1, 7, 2, "GOOD.", PAL_CHIP);
     else txt(1, 6, 2, "SOLVED.", PAL_UI);
     txt(1, 2, 3, "MOVES", PAL_UI);
-    txt_num(1, 8, 3, moves > 99 ? 99 : moves, 2, PAL_UI);
+    txt_num(1, 8, 3, moves, 2, PAL_UI);
     txt(1, 12, 3, "PAR", PAL_UI);
     txt_num(1, 16, 3, level.par, 2, PAL_UI);
     if (run.mode == MODE_RUN) {
@@ -488,7 +498,7 @@ static void win(void)
     }
     put_tile(1, 12, 4, UI_STAR, PAL_HUD_ACCENT);
     txt(1, 13, 4, "X", PAL_UI);
-    txt_num(1, 14, 4, run.streak > 99 ? 99 : run.streak, 2, PAL_UI);
+    txt_num(1, 14, 4, run.streak, 2, PAL_UI);
     txt(1, 2, 5, "COMPILING", PAL_UI);
     move_win(7, 80);
     wait_frames(4);
@@ -613,10 +623,11 @@ check_over:
 
 static uint8_t pause_menu(void)
 {
-    static const char *const items_run[] = { "RESUME", "RESTART", "HINT  -3", "ABANDON" };
+    /* ABANDON is padded to the width of its confirm prompt, so redrawing it erases the prompt */
+    static const char *const items_run[] = { "RESUME", "RESTART", "HINT  -3", "ABANDON    " };
     static const char *const items_zen[] = { "RESUME", "RESTART", "SKIP", "TITLE" };
     const char *const *items = run.mode == MODE_RUN ? items_run : items_zen;
-    uint8_t sel = 0, i;
+    uint8_t sel = 0, i, armed = 0;
 
     ps = PS_PAUSE;
     for (i = 0; i < 8; i++) hide_sprite(SP_PLAYER + i);   /* player, trail, hint */
@@ -635,10 +646,19 @@ static uint8_t pause_menu(void)
         set_sprite_tile(SP_CURSOR, SPR_CURSOR);
         set_sprite_prop(SP_CURSOR, SPAL_CURSOR);
         move_sprite(SP_CURSOR, (uint8_t)(8 + 16 + ((frame >> 3) & 1)), (uint8_t)(16 + 80 + 8 + sel * 8));
-        if (pressed & J_UP) { sel = (uint8_t)((sel + 3) & 3); sfx_play(SFX_MENU); }
-        if (pressed & J_DOWN) { sel = (uint8_t)((sel + 1) & 3); sfx_play(SFX_MENU); }
+        if (pressed & (J_UP | J_DOWN)) {
+            sel = (uint8_t)((sel + (pressed & J_UP ? 3 : 1)) & 3);
+            sfx_play(SFX_MENU);
+            if (armed) { armed = 0; txt(1, 4, 4, items[3], PAL_UI); }
+        }
         if (pressed & (J_B | J_START)) { sel = 0; break; }
-        if (pressed & J_A) break;
+        if (pressed & J_A) {
+            /* UP from RESUME wraps straight onto ABANDON: ending a run takes a second A */
+            if (sel != 3 || run.mode != MODE_RUN || armed) break;
+            armed = 1;
+            txt(1, 4, 4, "SURE? A=YES", PAL_PIT);
+            sfx_play(SFX_ERROR);
+        }
     }
     hide_sprite(SP_CURSOR);
     music_set_muffle(0);
@@ -650,20 +670,25 @@ static uint8_t pause_menu(void)
 
 static void do_hint(void)
 {
-    uint8_t rem;
-    if (!run_try_hint(&run)) {
+    static uint8_t rem;
+    /* the arrow is still up for this exact state (any move, rewind or
+     * restart hides it): show it again instead of charging a second time */
+    if (hint_dir <= 3) goto show;
+    if (run.mode == MODE_RUN && run.energy <= RUN_HINT_COST) {
         sfx_play(SFX_ERROR);
         hud_msg("LOW ENERGY");
         return;
     }
     hud_msg("TRACING...");
     hint_dir = solve_hint(&level, &st, &rem);
-    hud_numbers();
-    if (hint_dir > 3) {
+    if (hint_dir > 3) {         /* no answer, no charge */
         hud_msg("DEAD END: REWIND");
         sfx_play(SFX_ERROR);
         return;
     }
+    run_try_hint(&run);         /* 3 energy, and it breaks the BEST streak */
+    hud_numbers();
+show:
     sfx_play(SFX_HINT);
     hud_msg("MOVES LEFT:");
     txt_num(1, 16, 1, rem, 2, PAL_CHIP);
@@ -783,6 +808,9 @@ static void play(void)
 
 /* ---------------------------------------------------------------- title & codex */
 
+static const uint8_t hud_icon[4] = { UI_FLAG, UI_STEP, UI_BOLT, UI_STAR };
+static const char *const hud_label[4] = { "PAR", "MOVES", "ENERGY", "STREAK" };
+
 static void codex(void)
 {
     uint8_t page = 0, m, y, known;
@@ -795,7 +823,8 @@ static void codex(void)
     for (;;) {
         clear_bkg();
         if (page == 0) {
-            txt(0, 1, 0, "HOW IT WORKS", PAL_AMBER);
+            txt(0, 0, 0, "HOW IT WORKS", PAL_AMBER);
+            txt(0, 13, 0, "TILES >", PAL_WALL);
             txt(0, 1, 2, "YOU ARE A PACKET.", PAL_UI);
             txt(0, 1, 3, "YOU SLIDE UNTIL", PAL_UI);
             txt(0, 1, 4, "SOMETHING STOPS YOU", PAL_UI);
@@ -806,8 +835,14 @@ static void codex(void)
             txt(0, 1, 11, "1 ENERGY. CLEARS", PAL_UI);
             txt(0, 1, 12, "RECHARGE. REWIND", PAL_UI);
             txt(0, 1, 13, "IS FREE. TIME ISN'T", PAL_UI);
-            txt(0, 1, 15, "B REWIND  SEL HINT", PAL_CHIP);
-            txt(0, 1, 17, "RIGHT: TILES", PAL_UI);
+            /* the HUD icons, which nothing else names */
+            for (m = 0; m < 4; m++) {
+                y = (uint8_t)(m & 1 ? 10 : 1);
+                known = (uint8_t)(15 + (m >> 1));
+                put_tile(0, y, known, hud_icon[m], PAL_HUD_ACCENT);
+                txt(0, (uint8_t)(y + 1), known, hud_label[m], PAL_UI);
+            }
+            txt(0, 1, 17, "B REWIND  SEL HINT", PAL_CHIP);
         } else {
             txt(0, 1, 0, "CODEX", PAL_AMBER);
             txt(0, 13, 0, "< RULES", PAL_WALL);

@@ -50,7 +50,8 @@ the deepest a 10×8 board gets within the Game Boy's generation budget. Typical 
 ## Modes
 
 - **RUN** (the roguelike). You start with 30 energy, and each move costs 1. Clearing a sector refunds its par,
-  and a BEST also pays +2 plus a streak bonus. Hints cost 3. Hitting zero ends the run.
+  and a BEST also pays +2 plus a streak bonus. Hints cost 3 and break the BEST streak
+  (asking again for the same position, or getting no answer, is free). Hitting zero ends the run.
   An optimal player gains energy every sector, so the run ends when *you* slip.
   Each run has a seed (shown on pause / game over).
 - **ZEN**. No energy. Your sector number persists in the save, you can skip a sector from

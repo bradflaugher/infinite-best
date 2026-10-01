@@ -124,9 +124,9 @@ void gfx_set_palettes(void)
         set_bkg_palette(0, 8, bg_pal);
         set_sprite_palette(0, 8, spr_pal);
     }
-    BGP_REG = 0x1B;
-    OBP0_REG = 0x1B;
-    OBP1_REG = 0x4B;
+    BGP_REG = DMG_BGP;
+    OBP0_REG = DMG_OBP0;
+    OBP1_REG = DMG_OBP1;
 }
 
 void gfx_init(void)
@@ -245,9 +245,11 @@ void txt(uint8_t win, uint8_t x, uint8_t y, const char *s, uint8_t pal)
 
 void txt_num(uint8_t win, uint8_t x, uint8_t y, uint16_t v, uint8_t digits, uint8_t pal)
 {
+    static const uint16_t top[6] = { 0, 9, 99, 999, 9999, 65535u };
     char buf[6];
     uint8_t i;
     if (digits > 5) digits = 5;
+    if (v > top[digits]) v = top[digits];   /* saturate: 10000 shows 9999, not 0000 */
     buf[digits] = 0;
     for (i = digits; i > 0; i--) {
         buf[i - 1] = (char)('0' + v % 10);
