@@ -387,6 +387,123 @@ static void test_mechanics_matter(void)
     CHECK_EQ(p.focus, 0xFF);
 }
 
+/* par with every switch turned into floor (the gates freeze as they start) */
+static uint8_t par_without_switch(const Level *src)
+{
+    Level d = *src;
+    State s;
+    uint8_t i;
+    for (i = 0; i < GN; i++)
+        if (d.cell[i] == T_SWITCH) d.cell[i] = T_FLOOR;
+    state_start(&d, &s);
+    return solve(&d, &s);
+}
+
+/* A lesson has to be *used*, not just be in the way: on its teaching sector every
+ * optimal solution goes over the new pad / router / portal (without them the board
+ * gets longer or unsolvable), the gate lesson needs the switch and the chip lesson
+ * a detour. Before this rule the solution ignored the new tile on 40-60% of lessons
+ * (90% for gates), and the chips lay on the way anyway on 22% of chip lessons. */
+static void test_lessons_use_the_mechanic(void)
+{
+    static const uint8_t used_mechs[] = { M_STOP, M_ARROW, M_PORTAL, M_GATE };
+    Level L;
+    uint16_t seed;
+    uint8_t i, m, p2;
+    int used;
+    for (i = 0; i < sizeof used_mechs; i++) {
+        m = used_mechs[i];
+        used = 0;
+        for (seed = 1; seed <= 40; seed++) {
+            gen_level(&L, (uint16_t)(seed * 977u), mech_unlock[m], 0);
+            p2 = m == M_GATE ? par_without_switch(&L) : par_without(&L, m);
+            used += p2 == SOLVE_NONE || p2 > L.par;
+        }
+        CHECK(used >= 36);
+    }
+    /* the chip lesson needs a detour: with the exit online from the start it's shorter */
+    for (seed = 1; seed <= 40; seed++) {
+        Level V;
+        State st;
+        gen_level(&L, (uint16_t)(seed * 977u), UNLOCK_CHIP, 0);
+        V = L;
+        for (i = 0; i < L.nchips; i++) V.cell[L.chip_pos[i]] = T_FLOOR;
+        V.nchips = 0;
+        state_start(&V, &st);
+        CHECK(solve(&V, &st) < L.par);
+    }
+    /* pits can only block: without them the lesson gets shorter */
+    for (seed = 1; seed <= 40; seed++) {
+        gen_level(&L, (uint16_t)(seed * 977u), UNLOCK_PIT, 0);
+        p2 = par_without(&L, M_PIT);
+        CHECK(p2 != SOLVE_NONE && p2 < L.par);
+    }
+}
+
+static uint8_t special_tile(uint8_t t)
+{
+    return t == T_STOP || (t >= T_ARROW_U && t <= T_GATE_B) || t == T_PIT;
+}
+
+/* The clean-up pass: special tiles whose removal leaves par unchanged are taken off
+ * the board (about 70% of all special tiles were such clutter before it). Routers
+ * never point straight into a wall. */
+static void test_boards_are_tidy(void)
+{
+    Level L, V;
+    State s;
+    uint16_t seed, sector;
+    uint8_t i, t, k;
+    int specials = 0, idle = 0, lesson_idle = 0;
+    for (seed = 1; seed <= 12; seed++) {
+        for (sector = 3; sector <= 120; sector += 3) {
+            gen_level(&L, (uint16_t)(seed * 3331u), sector, 0);
+            for (i = 0; i < GN; i++) {
+                t = L.cell[i];
+                if (t >= T_ARROW_U && t <= T_ARROW_L)
+                    CHECK(L.cell[(uint8_t)(i + dir_dpos[t - T_ARROW_U])] != T_WALL);
+                if (!special_tile(t)) continue;
+                specials++;
+                V = L;
+                V.cell[i] = T_FLOOR;
+                state_start(&V, &s);
+                k = solve(&V, &s) == L.par;
+                idle += k;
+                if (L.featured != 0xFF && L.featured != M_GATE) lesson_idle += k;
+            }
+        }
+    }
+    CHECK(specials > 500);
+    CHECK(idle * 100 < specials * 25);
+    CHECK_EQ(lesson_idle, 0);
+}
+
+/* solve_limit cuts the search off: a board that needs more moves reads unsolvable */
+static void test_solve_limit(void)
+{
+    const char *m[LH] = {
+        "P....#....",
+        "..........",
+        "..........",
+        "..........",
+        "..........",
+        "..........",
+        "..........",
+        ".........E" };
+    Level L; State s;
+    parse(&L, m);
+    state_start(&L, &s);
+    CHECK_EQ(solve_limit, SOLVE_MAX_DEPTH);
+    solve_limit = 1;
+    CHECK_EQ(solve(&L, &s), SOLVE_NONE);
+    solve_limit = 2;
+    CHECK_EQ(solve(&L, &s), 2);
+    solve_limit = SOLVE_MAX_DEPTH;
+    /* the generator leaves it as it found it */
+    gen_level(&L, 77, 14, 0);
+    CHECK_EQ(solve_limit, SOLVE_MAX_DEPTH);
+}
+
 static void test_difficulty_curve(void)
 {
     GenParams p1, p50;
@@ -502,6 +619,9 @@ int main(void)
     test_generator_determinism();
     test_teaching_levels();
     test_mechanics_matter();
+    test_lessons_use_the_mechanic();
+    test_boards_are_tidy();
+    test_solve_limit();
     test_difficulty_curve();
     test_endless_curve();
     test_run_economy();

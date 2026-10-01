@@ -29,9 +29,14 @@ a second or two while you read your grade, and the game saves after every clear.
 ## What makes it tick
 
 - **Wordless teaching.** Each new mechanic arrives on a sector designed around it, with a
-  one-line label. The generator checks that the new idea actually matters: it strips the
-  mechanic out, re-solves, and rejects the level if the par doesn't change. The sectors that
-  follow keep asking the newest idea to matter, so it doesn't fade into decoration. *(After The Witness.)*
+  one-line label. The generator checks that you actually have to *use* the new idea: it strips
+  the mechanic out, re-solves, and rejects the level unless that makes it longer or unsolvable
+  (the gate lesson needs its switch, the chip lesson a detour, and pits, which can only get in
+  your way, must close a shortcut). The sectors that follow keep asking the newest idea to
+  matter, so it doesn't fade into decoration. *(After The Witness.)*
+- **Nothing on the board is clutter.** After a sector is found, a clean-up pass takes off
+  every pad, pit, router, gate and portal that par doesn't need, so what's left is there for a
+  reason. Before it, about 70% of special tiles changed nothing.
 - **Rewind is free; time is not.** Hold **B** to rewind up to 256 moves back. The screen ripples
   and the music detunes. But your move counter and energy only go forward, so rewinding helps
   you understand the puzzle but can't earn you par. *(After Braid.)*
@@ -106,6 +111,7 @@ CGB-enhanced: colour and double speed on Color hardware, fully playable on an or
   unlocked mechanics, then hill-climbs the closest one: it toggles walls and moves tiles, and it
   moves the exit to the stop furthest from the start, keeping edits that bring par into the
   sector's window. Random rolls top out around par 10. The climb takes deep sectors to 13-15.
+  A last pass removes the special tiles that par doesn't need.
 - **The solver** (`src/core/solver.c`) runs a breadth-first search over every reachable
   *(position × chips × switch)* state, at most 1280 of them, to find the exact par. Candidates
   outside the sector's difficulty window are rejected. A hand-built fallback means the game
@@ -113,8 +119,9 @@ CGB-enhanced: colour and double speed on Color hardware, fully playable on an or
 - **Speed.** The slide inside the BFS is hand-written assembly over a wall-padded 12×10 grid,
   so it needs no bounds checks, multiplies or divides. It is about 10× faster than the
   compiler's version. Generation runs on a fixed work budget (the same on every machine, so it
-  stays deterministic): typically 0.2–1.5 s on a DMG and about half that on a Color, and fewer
-  than 1 sector in 1,000 takes over 4 s. It runs while the clear banner is up.
+  stays deterministic): typically 0.7–3.5 s on a DMG (median 1.9 s; the first 100 sectors
+  average 1.4 s) and about half that on a Color, and fewer than 1 sector in 1,000 takes over
+  4 s. It runs while the clear banner is up.
 - **Determinism.** Everything is fixed-width integer maths on a 16-bit xorshift, so the Game Boy
   and a PC generate *byte-identical* sectors, and CI checks this.
 - **Sound.** A custom 4-channel driver runs from VBlank. It has instruments, arpeggios, vibrato,
@@ -165,17 +172,19 @@ python3 tools/screenshots.py   # regenerate the images in this README
 build/ibgen show 42 30     # ASCII render of seed 42, sector 30
 build/ibgen solve 42 30    # optimal solution, e.g. "9 DLLDLDLUR"
 build/ibgen stats 100 100  # generator statistics over 10,000 sectors
+build/ibgen quality 20 300 # puzzle-quality metrics per sector band (see below)
+build/ibgen q 42 30        # one board with its quality metrics
 ```
 
 ### Tests
 
-- **Core, ~28k assertions.**
+- **Core, ~29k assertions.**
   - Every rule and edge case: slides, chips, stop pads, pits, router loops, gates flipping
     mid-slide, portals, unsolvable boards, hints.
   - About 1,500 generated sectors, each replayed along the solver's hint chain and required to
     finish in exactly `par` moves.
-  - Determinism, teaching sectors, the difficulty curve, the energy economy, and the RNG's full
-    65,535 period.
+  - Determinism, teaching sectors (the lesson is used, not just present), the clean-up pass,
+    the difficulty curve, the energy economy, and the RNG's full 65,535 period.
 - **Sound, 570 assertions.** Plays every song and effect against a fake APU and checks the
   register writes. Also covers channel ownership, loops, rewind and muffle, plus a random stress
   test.

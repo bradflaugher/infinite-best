@@ -10,6 +10,7 @@
 static uint8_t visited[NSTATE_IDS / 8];
 static uint16_t queue[QUEUE_MAX];
 uint16_t solve_visited;
+uint8_t solve_limit = SOLVE_MAX_DEPTH;
 
 static const uint8_t bitmask[8] = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
@@ -215,7 +216,7 @@ uint8_t solve(const Level *L, const State *from) CORE_BANKED
     queue[tail++] = id;
     solve_visited = 1;
 
-    while (head < tail && depth < SOLVE_MAX_DEPTH) {
+    while (head < tail && depth < solve_limit) {
         layer_end = tail;
         depth++;
         while (head < layer_end) {
