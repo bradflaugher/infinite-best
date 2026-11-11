@@ -59,6 +59,17 @@ jobs:
       - name: Emulator tests (DMG + CGB, plays real sectors)
         run: make test-rom
 
+      # A second, cycle-accurate emulator. It runs the whole suite again and steps the ROM
+      # one instruction at a time to catch what only shows on a console: VRAM writes the
+      # LCD refuses, raster effects losing their interrupts. If libmgba can't be installed
+      # the tests skip themselves rather than fail the build.
+      - name: Install mGBA (headless, for the hardware-accuracy tests)
+        continue-on-error: true
+        run: sudo apt-get update && sudo apt-get install -y libmgba-dev
+
+      - name: Hardware-accuracy tests (mGBA, DMG + CGB)
+        run: make test-hw
+
       - name: Generator statistics
         run: build/ibgen stats 50 60 | tail -n 5
 

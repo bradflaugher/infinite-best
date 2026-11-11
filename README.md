@@ -39,7 +39,8 @@ a second or two (about two on an original Game Boy) while you read your grade, a
   reason. Before it, about 70% of special tiles changed nothing.
 - **Rewind is free; time is not.** Hold **B** to rewind up to 256 moves back. The screen ripples
   and the music detunes. But your move counter and energy only go forward, so rewinding helps
-  you understand the puzzle but can't earn you par. *(After Braid.)*
+  you understand the puzzle but can't earn you par, and the move that takes you past par
+  says `OVER PAR`. *(After Braid.)*
 - **A roguelike you can put down.** RUN mode is a fresh seeded run where every move costs energy
   and every BEST pays you back. ZEN mode has no pressure and remembers where you are.
 - **Seeds you can share.** Every run has a 4-digit hex seed. Type one in with **SEED** and play
@@ -70,15 +71,16 @@ The single release is always the latest build. Its tag is the build date (`YYYY.
 | --- | --- |
 | D-pad | Slide |
 | **B** (hold) | Rewind, free, up to 256 moves back (energy already spent stays spent) |
-| **SELECT** | Hint: the optimal next move and how many moves remain. In RUN it costs 3 energy and breaks your BEST streak. Asking again while the arrow is still showing is free, and so is a hint that finds no way out |
+| **SELECT** | Hint: the optimal next move and how many moves remain. In RUN it costs 3 energy and breaks your BEST streak. Asking again while the arrow is still showing is free, and so is a hint that finds no way out. A hint you couldn't afford to follow (it would leave less energy than the moves still needed) is refused, not sold |
 | **START** | Pause: resume · restart · hint/skip · quit (abandoning a RUN asks you to confirm) |
+| **A+B+START+SELECT** | Soft reset, back to the title (everything is already saved) |
 
 ### Modes
 
 | Mode | What it is |
 | --- | --- |
-| **RUN** | Roguelike. You start with 40 ⚡ (max 60) and each move costs 1. A clear refunds its par, and a BEST adds +1, rising to +2 on a 3-BEST streak and +3 on a 6-streak. Every wasted move is a real loss. Reach zero, or start a sector with less energy than its par, and the run ends. Your furthest sector is the record. |
-| **ZEN** | Endless and calm. No energy, free hints, skip any sector. Your sector is saved. |
+| **RUN** | Roguelike. You start with 40 ⚡ (max 60) and each move costs 1. A clear refunds its par, and a BEST adds +1, rising to +2 on a 3-BEST streak and +3 on a 6-streak. Every wasted move is a real loss. Reach zero, or start a sector with less energy than its par, and the run ends. Your furthest sector is the record. Once a run has reached sector 22, where the lessons end, the title offers `<S0022>` on the RUN line (◀ ▶): start the next run there, on the same 40 ⚡, instead of replaying them. |
+| **ZEN** | Endless and calm. No energy, free hints, skip any sector. Your sector is saved. RESTART is a fresh attempt: the move count goes back to zero, so you can replay a sector until you BEST it. (In RUN a restart is only a long rewind: the moves are spent.) |
 | **SEED** | Start a RUN from a seed you type in (the pause and game-over screens show the current one). |
 | **CODEX** | The rules and the HUD icons, plus a field guide that fills in as you discover mechanics. |
 
@@ -166,6 +168,7 @@ make test         # all of the below
 make test-host    # C unit tests: rules, solver, generator, economy, sound engine
 make test-assets  # asset pipeline tests
 make test-rom     # boots the ROM in PyBoy (DMG + CGB) and plays it
+make test-hw      # the same and more on cycle-accurate mGBA (needs libmgba-dev; skipped without)
 python3 tools/screenshots.py   # regenerate the images in this README
 ```
 
@@ -181,7 +184,7 @@ build/ibgen q 42 30        # one board with its quality metrics
 
 ### Tests
 
-- **Core, ~29k assertions.**
+- **Core, ~30k assertions.**
   - Every rule and edge case: slides, chips, stop pads, pits, router loops, gates flipping
     mid-slide, portals, unsolvable boards, hints.
   - About 1,500 generated sectors, each replayed along the solver's hint chain and required to
@@ -200,7 +203,19 @@ build/ibgen q 42 30        # one board with its quality metrics
     clear is a BEST.
   - Tests rewind (state restored, energy not refunded, a crash never costs history), pause/restart,
     the abandon confirm, hint pricing, seed entry, running out of energy, records saved on every
-    clear, number saturation, the game-over screen and the codex.
+    clear, number saturation, the game-over screen and the codex, the ZEN fresh start, the
+    sector-22 start, `OVER PAR`, and the soft reset.
+  - Looks at the screen, not only at the game's variables: at every stop of every solution the
+    tiles and colour attributes in VRAM must match the level and the HUD must match the run. A
+    write that lands while the LCD is drawing is dropped by a real Game Boy (and by both
+    emulators), which leaves the game right and the picture wrong.
+- **Hardware accuracy, on headless [mGBA](https://mgba.io)** (`tools/mgba`, `tests/test_hw.py`).
+  - The whole ROM suite again, DMG and CGB, on a cycle-accurate core.
+  - The ROM stepped one instruction at a time through every screen: no store to VRAM or palette
+    RAM may be refused by the PPU.
+  - The rewind wave and the logo ripple must get every one of their scanline interrupts on every
+    frame, even when the sound driver keeps the VBlank handler busy past the end of VBlank
+    (which on a DMG is one frame in four).
 
 ### CI and releases
 

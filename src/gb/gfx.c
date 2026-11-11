@@ -17,6 +17,7 @@ static uint16_t spr_pal[8 * 4];
 #define ASSETS_IN()  uint8_t _bank = CURRENT_BANK; SWITCH_ROM(BANK(assets))
 #define ASSETS_OUT() SWITCH_ROM(_bank)
 volatile uint8_t frame;
+uint8_t dbg_vbl_late;       /* test hook: frames whose VBlank VRAM work ended outside VBlank */
 int8_t shake_x, shake_y;
 
 static uint8_t shake_amt;
@@ -47,12 +48,17 @@ static const uint16_t white_pal[8 * 4] = {
 /* LYC handler: per-band horizontal offset for the Braid-style rewind wave and
  * the death glitch. It chains itself every WAVE_STEP lines inside
  * [wave_top, wave_bottom) and restores the scroll at wave_bottom, so a DMG only
- * pays for ~20-30 interrupts per frame instead of 144 HBlanks. */
+ * pays for ~20-30 interrupts per frame instead of 144 HBlanks.
+ *
+ * It works from LY, the line the LCD is really on, not from the LYC it asked for:
+ * if the handler is served late (another interrupt was running), the next
+ * LYC is still ahead of the beam. Chaining from the stale LYC would ask for a line
+ * that has already gone by, and the rest of the frame would lose the effect. */
 #define WAVE_STEP 4
 static void lcd_isr(void)
 {
-    uint8_t ly = LYC_REG, next;
-    if (ly >= wave_bottom) {
+    uint8_t ly = LY_REG, next;
+    if (ly >= wave_bottom || ly < wave_top) {
         SCX_REG = wave_base;
         LYC_REG = wave_top;
         return;
@@ -91,7 +97,10 @@ static void busy_tick(void)
     uint8_t *p = (uint8_t *)(0x9C00u + (uint16_t)busy_row * 32u + busy_x);
     uint16_t c = gen_cost >> 7;             /* 128 units per cell: full at ~GEN_BUDGET */
     uint8_t n = (uint8_t)(c > BUSY_W ? BUSY_W : c);
-    while (busy_cells < n) p[busy_cells++] = UI_BAR_FULL;   /* never shrinks */
+    /* never shrinks; and at most 4 cells a frame, so one big solve can't make this
+     * handler write a whole bar's worth and run out of VBlank */
+    if (n > (uint8_t)(busy_cells + 4)) n = (uint8_t)(busy_cells + 4);
+    while (busy_cells < n) p[busy_cells++] = UI_BAR_FULL;
     if (busy_cells < BUSY_W) p[busy_cells] = (frame & 8) ? UI_BAR_HALF : TILE_BLANK;
     /* a highlight runs along the filled part, so even a full bar keeps moving */
     if (busy_cells > 1 && (frame & 3) == 0) {
@@ -103,6 +112,7 @@ static void busy_tick(void)
 
 static void vbl_isr(void)
 {
+    static uint8_t in_sound;
     frame++;
     wave_base = (uint8_t)shake_x;
     SCX_REG = (uint8_t)shake_x;
@@ -115,7 +125,22 @@ static void vbl_isr(void)
         pal_req = 0;
     }
     if (busy_row != 0xFF) busy_tick();
-    sound_tick();       /* after the timing-sensitive register writes */
+    /* The writes above go straight to VRAM and palette RAM, which only VBlank (mode 1)
+     * allows: if this handler ever started late or grew too long they would be dropped
+     * without a trace, so leave one for the tests. */
+    if ((STAT_REG & 3) != 1 && dbg_vbl_late != 0xFF) dbg_vbl_late++;
+    /* Everything above needs VBlank and is short. The sound driver does not, and on
+     * a row with new notes it runs long: measured up to 38 scanlines on a DMG (past
+     * the 10 lines of VBlank on about 1 frame in 4) and 20 on a Color. With
+     * interrupts masked for all of that, the wave's LYC interrupts for the top of
+     * the screen were lost and that frame showed no wave at all. So let the LCD
+     * interrupt back in while the music plays. */
+    if (in_sound) return;       /* never re-enter the driver */
+    in_sound = 1;
+    enable_interrupts();
+    sound_tick();
+    disable_interrupts();
+    in_sound = 0;
 }
 
 void gfx_set_palettes(void)

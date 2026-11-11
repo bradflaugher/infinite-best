@@ -64,8 +64,27 @@ the deepest a 10×8 board gets within the Game Boy's generation budget. Typical 
   player model (`median sector reached`), a 50% BEST rate now gets to about 19, 70% to about 32,
   85% to about 60 and 95% to about 100+.
   Each run has a seed (shown on pause / game over).
+  A hint is only sold if the energy left after paying covers the moves it says remain;
+  it used to be possible to buy one at the start of a sector and be ended by
+  PAR > ENERGY on the next frame.
+  Sectors 1-21 are the lessons, and replaying them at the start of every run is a few
+  minutes with nothing at stake. Once a run has reached sector 22 the title lets the next
+  one start there (`RUN <S0022>`, left/right), on the same seed stream and the same 40
+  energy. A clean run through the lessons arrives at 22 with a full tank of 60, so the
+  shortcut costs 20 energy; that is the trade. SEED runs always start at sector 1, so a
+  shared seed is the same race for everyone.
 - **ZEN**. No energy. Your sector number persists in the save, you can skip a sector from
-  the pause menu, and hints are free.
+  the pause menu, and hints are free. RESTART is a fresh attempt: the move count returns to
+  zero and the rewind history is dropped (otherwise a rewind would carry an old position
+  into the new count), so a sector can be replayed until it is a BEST. Before, one slip
+  put BEST out of reach for good, in the one mode with nothing to lose. Rewind still never
+  gives moves back, in either mode; in RUN a restart stays a long rewind.
+
+The move that takes the count past par puts `OVER PAR` on the HUD line (once; the next move
+clears it). On a Color the count also turns amber, but a DMG had no cue at all.
+
+Counters stop at their top instead of wrapping (sector 65535 repeats; it used to wrap to
+sector 0), and A+B+START+SELECT is a soft reset.
 
 ## How the generator works (and why it always has a solution)
 
@@ -158,6 +177,23 @@ while the clear banner is up, under a "COMPILING" progress bar. The bar is drawn
 interrupt, so it keeps filling (and a highlight keeps running along it) even while the CPU is
 deep inside one solve. A long compile
 shortens the banner's reading pause by the same amount.
+
+## Hardware notes
+
+- **All VRAM writes from the main loop go through GBDK's tile routines**, which wait for
+  the LCD to leave modes 2/3 before every byte, and GBDK's interrupt return waits for the
+  same, so an interrupt between the wait and the write can't push the write into mode 3.
+  The VBlank handler writes VRAM directly (the compile bar) and CGB palettes (flashes) first
+  thing, when the whole of VBlank is ahead of it; `dbg_vbl_late` counts any frame where
+  that work ended outside VBlank, and the tests assert it never does.
+- **The sound driver runs in the VBlank handler and is slow on rows with new notes**: up to
+  38 scanlines on a DMG, 20 on a Color, where VBlank is 10. It runs last, with interrupts
+  enabled again, so the wave's scanline interrupts still arrive; and the wave handler
+  chains from LY (where the beam is), not from the LYC it asked for. Before this, a DMG
+  lost the rewind wave on about one frame in five.
+- `tests/test_hw.py` checks all of this on mGBA by stepping the ROM one instruction at a
+  time (`tools/mgba/mgba_server.c`: dropped stores, handler lengths, STAT interrupts per
+  frame). PyBoy also drops mode-3 writes, so the ROM tests compare VRAM with the level too.
 
 ## Juice
 

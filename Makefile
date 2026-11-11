@@ -16,7 +16,7 @@ HOST_CFLAGS := -std=c99 -O2 -Wall -Wextra -Werror
 LCCFLAGS := -Wm-yt0x1B -Wm-yc -Wm-yn"INFINITEBEST" -Wm-yoA -autobank -Wm-ya1 \
             -Wl-j -Wm-yS -Wf--max-allocs-per-node50000 -I$(BUILD)
 
-.PHONY: all rom assets test test-host test-assets test-rom clean
+.PHONY: all rom assets test test-host test-assets test-rom test-hw mgba clean
 
 all: rom
 
@@ -53,7 +53,19 @@ test-assets:
 test-rom: $(ROM) $(BUILD)/ibgen
 	$(PYTHON) -m unittest discover -s tests -p 'test_rom.py' -v
 
-test: test-host test-assets test-rom
+# The headless mGBA harness: a second, cycle-accurate emulator that behaves like the
+# hardware where PyBoy does not (needs libmgba-dev).
+mgba: $(BUILD)/mgba_server
+
+$(BUILD)/mgba_server: tools/mgba/mgba_server.c | $(BUILD)
+	$(CC) -O2 -Wall -o $@ $< -lmgba
+
+# Hardware-accuracy tests on mGBA; they skip themselves when the harness can't be built.
+test-hw: $(ROM) $(BUILD)/ibgen
+	@$(MAKE) -s $(BUILD)/mgba_server 2>/dev/null || echo "libmgba-dev not found: the mGBA tests will be skipped"
+	$(PYTHON) -m unittest discover -s tests -p 'test_hw.py' -v
+
+test: test-host test-assets test-rom test-hw
 
 clean:
 	rm -rf $(BUILD)

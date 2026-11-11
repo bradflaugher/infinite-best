@@ -51,6 +51,11 @@ static uint8_t buf_dir = 0xFF;   /* direction pressed mid-slide, played on landi
 static uint8_t msg_temp;         /* HUD message is transient: cleared by the next move */
 static uint8_t title_sel;        /* title cursor survives trips to codex / seed entry */
 static uint16_t record_at_start; /* RUN record before this run, for NEW RECORD! */
+/* Once a RUN has reached the end of the lessons, a new one may start there instead of
+ * replaying them: the same seed's sector 22, with the same 40 energy a fresh run gets
+ * (a clean run through the lessons arrives with a full tank, so the shortcut has a price). */
+#define WARP_SECTOR FREEFORM_SECTOR
+static uint8_t warp;             /* title choice, kept while the power is on */
 
 static const char *const mech_name[NUM_MECH] = {
     "STOP PAD", "DATA CHIP", "NULL PIT", "ROUTER", "TOGGLE GATES", "PORTAL"
@@ -77,12 +82,18 @@ static void input(void)
     pressed = (uint8_t)(keys & ~prev_keys);
 }
 
+/* A+B+START+SELECT, the usual Game Boy soft reset: back to the title without reaching
+ * for the power switch. Every save is written whole as it happens, so there is nothing
+ * to lose. */
+#define J_RESET (J_A | J_B | J_START | J_SELECT)
+
 static void tick(void)
 {
     wait_vbl_done();
     fx_update();
     part_update();
     input();
+    if ((keys & J_RESET) == J_RESET) reset();
     seed_acc = (uint16_t)(seed_acc * 31u + DIV_REG + keys);
 }
 
@@ -298,6 +309,8 @@ static void start_level(void)
     else hud_msg("");
     msg_temp = 0;       /* tutorial lines stay up until something replaces them */
     buf_dir = 0xFF;
+    /* set before game_state, so the pair never reads "playing, idle" under the banner */
+    if (level.featured != 0xFF) ps = PS_INTRO;
     game_state = GS_PLAY;
     if (level.featured != 0xFF) mech_intro();
     ps = PS_IDLE;
@@ -389,6 +402,8 @@ static void try_move(uint8_t dir, uint8_t buffered)
     if (r != MV_DEAD && r != MV_LOOP) hist_push(&st);
     run_on_move(&run);
     hud_numbers();
+    /* the move that puts a BEST out of reach says so: the amber count is CGB only */
+    if (run.moves == (uint8_t)(level.par + 1) && r != MV_WIN) hud_msg("OVER PAR");
     pending_r = r;
     slide_k = 0;
     slide_speed = 2;
@@ -460,8 +475,8 @@ static void win(void)
     part_burst((uint8_t)(px + 8), (uint8_t)(py + 8), 16,
                grade == GRADE_BEST ? SPR_STAR : SPR_SPARK_BIG, SPAL_STAR, 4);
 
-    save.lifetime_cleared++;
-    if (grade == GRADE_BEST) save.lifetime_bests++;
+    if (save.lifetime_cleared != 0xFFFF) save.lifetime_cleared++;       /* never wrap to 0 */
+    if (grade == GRADE_BEST && save.lifetime_bests != 0xFFFF) save.lifetime_bests++;
     if (run.mode == MODE_ZEN) save.zen_sector = run.sector;
     if (run.mode == MODE_RUN) {
         /* every RUN record is saved as it happens, so a power-off mid-run keeps it */
@@ -686,6 +701,14 @@ static void do_hint(void)
         sfx_play(SFX_ERROR);
         return;
     }
+    /* paying must leave enough for the moves the hint says are left: a hint that
+     * ends the run (PAR > ENERGY, or stranded one move short) is no help */
+    if (!run_can_hint(&run, rem)) {
+        hint_dir = 0xFF;
+        sfx_play(SFX_ERROR);
+        hud_msg("LOW ENERGY");
+        return;
+    }
     run_try_hint(&run);         /* 3 energy, and it breaks the BEST streak */
     hud_numbers();
 show:
@@ -756,7 +779,15 @@ static void play(void)
             else if (pressed & J_START) {
                 sel = pause_menu();
                 if (sel == 1) {
-                    hist_push(&st);
+                    if (run_retry(&run)) {
+                        /* ZEN: a fresh attempt. The old positions go, or a rewind
+                         * would carry one into the new move count. */
+                        hist_n = 0;
+                        hist_top = 0;
+                        hud_numbers();
+                    } else {
+                        hist_push(&st);
+                    }
                     hint_hide();
                     state_start(&level, &st);
                     anim_chips = 0; anim_sw = 0;
@@ -764,7 +795,7 @@ static void play(void)
                     player_place(st.pos);
                     hud_chips(0);
                     sfx_play(SFX_REWIND);
-                    hud_msg("REBOOTED");
+                    hud_msg(run.mode == MODE_ZEN ? "FRESH START" : "REBOOTED");
                 } else if (sel == 2) {
                     if (run.mode == MODE_RUN) do_hint();
                     else {
@@ -882,6 +913,19 @@ static void codex(void)
     }
 }
 
+static uint8_t warp_unlocked(void)
+{
+    return (uint8_t)(save.run_best_sector >= WARP_SECTOR);
+}
+
+static void title_warp_draw(void)
+{
+    if (!warp_unlocked()) return;
+    txt(0, 12, 9, "<S", PAL_WALL);
+    txt_num(0, 14, 9, warp ? WARP_SECTOR : 1, 4, warp ? PAL_AMBER : PAL_UI);
+    txt(0, 18, 9, ">", PAL_WALL);
+}
+
 static uint8_t title(void)
 {
     static const char *const items[4] = { "RUN", "ZEN", "SEED", "CODEX" };
@@ -896,6 +940,7 @@ static uint8_t title(void)
     gfx_load_logo();
     gfx_draw_logo(1);
     for (i = 0; i < 4; i++) txt(0, 8, (uint8_t)(9 + i * 2), items[i], PAL_UI);
+    title_warp_draw();
     txt(0, 13, 11, "S", PAL_UI);
     txt_num(0, 14, 11, save.zen_sector, 4, PAL_UI);
     txt(0, 1, 17, "RECORD", PAL_UI);
@@ -918,6 +963,11 @@ static uint8_t title(void)
                        SPR_SPARK_SMALL, (uint8_t)(SPAL_SPARK + (t & 16 ? 2 : 0)), 1);
         if (pressed & J_UP) { sel = (uint8_t)(sel ? sel - 1 : 3); sfx_play(SFX_MENU); }
         if (pressed & (J_DOWN | J_SELECT)) { sel = (uint8_t)(sel == 3 ? 0 : sel + 1); sfx_play(SFX_MENU); }
+        if (sel == 0 && warp_unlocked() && (pressed & (J_LEFT | J_RIGHT))) {
+            warp ^= 1;
+            title_warp_draw();
+            sfx_play(SFX_MENU);
+        }
         if (pressed & (J_A | J_START)) break;
     }
     sfx_play(SFX_SELECT);
@@ -1015,7 +1065,7 @@ void game_main(void) BANKED
         } else if (choice == 0) {
             uint16_t seed = dbg_seed ? dbg_seed : (uint16_t)(seed_acc ^ ((uint16_t)DIV_REG << 8) ^ frame);
             if (!seed) seed = 0xB357;
-            run_start(&run, MODE_RUN, seed, 1);
+            run_start(&run, MODE_RUN, seed, warp && warp_unlocked() ? WARP_SECTOR : 1);
         } else {
             if (!save.zen_seed) {
                 save.zen_seed = dbg_seed ? dbg_seed : (uint16_t)(seed_acc ^ ((uint16_t)DIV_REG << 8) ^ 0x2E4);

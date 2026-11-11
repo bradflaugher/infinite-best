@@ -698,6 +698,56 @@ static void test_run_economy(void)
     CHECK(run_skip(&r));
     CHECK_EQ(r.sector, 8);
     CHECK(run_try_hint(&r));
+    /* a ZEN restart is a fresh attempt (a BEST is back on); a RUN restart is not */
+    for (i = 0; i < 9; i++) run_on_move(&r);
+    CHECK_EQ(r.moves, 9);
+    CHECK(run_retry(&r));
+    CHECK_EQ(r.moves, 0);
+    CHECK_EQ(r.sector, 8);
+    CHECK(run_can_hint(&r, 60));              /* hints are free here */
+    run_start(&r, MODE_RUN, 1, 1);
+    run_on_move(&r);
+    CHECK(!run_retry(&r));
+    CHECK_EQ(r.moves, 1);
+    /* a hint that would leave less energy than the moves still needed only buys a
+     * lost run, so it is refused: 3 for the hint + 5 moves left needs 8 */
+    r.energy = RUN_HINT_COST + 5;
+    CHECK(run_can_hint(&r, 5));
+    r.energy = RUN_HINT_COST + 4;
+    CHECK(!run_can_hint(&r, 5));
+    r.energy = RUN_HINT_COST;
+    CHECK(!run_can_hint(&r, 1));
+}
+
+/* Nothing wraps on a very long game: counters stop at their top instead. */
+static void test_counters_saturate(void)
+{
+    Run r;
+    Level L;
+    uint16_t i;
+    run_start(&r, MODE_RUN, 7, 0xFFFE);
+    r.bests = 0xFFFF;
+    r.cleared = 0xFFFF;
+    r.streak = 255;
+    r.best_streak = 255;
+    r.moves = 3;
+    run_on_win(&r, 3);
+    CHECK_EQ(r.sector, 0xFFFF);
+    run_on_win(&r, 3);
+    CHECK_EQ(r.sector, 0xFFFF);               /* not 0 */
+    CHECK_EQ(r.bests, 0xFFFF);
+    CHECK_EQ(r.cleared, 0xFFFF);
+    CHECK_EQ(r.streak, 255);
+    for (i = 0; i < 300; i++) run_on_move(&r);
+    CHECK_EQ(r.moves, 255);
+    CHECK_EQ(r.energy, 0);
+    run_start(&r, MODE_ZEN, 7, 0xFFFF);
+    CHECK(run_skip(&r));
+    CHECK_EQ(r.sector, 0xFFFF);
+    /* and the generator still builds a solvable board at the far end */
+    gen_level(&L, 7, 0xFFFF, 0);
+    CHECK(L.par > 0);
+    CHECK_EQ(L.sector, 0xFFFF);
 }
 
 int main(void)
@@ -723,6 +773,7 @@ int main(void)
     test_difficulty_curve();
     test_endless_curve();
     test_run_economy();
+    test_counters_saturate();
     printf("core: %d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;
 }
