@@ -47,7 +47,7 @@ uint8_t run_on_win(Run *r, uint8_t par)
     uint8_t g = run_grade(r->moves, par);
 
     if (g == GRADE_BEST) {
-        r->bests++;
+        if (r->bests < 0xFFFF) r->bests++;
         if (r->streak < 255) r->streak++;
         if (r->streak > r->best_streak) r->best_streak = r->streak;
     } else {
@@ -62,10 +62,16 @@ uint8_t run_on_win(Run *r, uint8_t par)
         gain = (uint8_t)(e - r->energy);
         r->energy = (uint8_t)e;
     }
-    r->cleared++;
-    r->sector++;
+    if (r->cleared < 0xFFFF) r->cleared++;
+    if (r->sector < 0xFFFF) r->sector++;    /* the last sector repeats rather than wrapping to 0 */
     r->moves = 0;
     return gain;
+}
+
+uint8_t run_can_hint(const Run *r, uint8_t remaining)
+{
+    if (r->mode != MODE_RUN) return 1;
+    return (uint8_t)(r->energy >= (uint8_t)(RUN_HINT_COST + remaining));
 }
 
 uint8_t run_try_hint(Run *r)
@@ -80,8 +86,15 @@ uint8_t run_try_hint(Run *r)
 uint8_t run_skip(Run *r)
 {
     if (r->mode != MODE_ZEN) return 0;
-    r->sector++;
+    if (r->sector < 0xFFFF) r->sector++;
     r->moves = 0;
     r->streak = 0;
+    return 1;
+}
+
+uint8_t run_retry(Run *r)
+{
+    if (r->mode != MODE_ZEN) return 0;
+    r->moves = 0;
     return 1;
 }

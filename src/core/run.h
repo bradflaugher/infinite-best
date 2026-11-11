@@ -40,10 +40,18 @@ uint8_t run_grade(uint8_t moves, uint8_t par);
 uint8_t run_best_bonus(uint8_t streak);
 /* call on win; returns energy gained (run mode) */
 uint8_t run_on_win(Run *r, uint8_t par);
+/* Can a hint be paid for and still leave enough energy for the `remaining` moves the
+ * solver says are left? Buying one that leaves less only buys a lost run (always 1 in ZEN). */
+uint8_t run_can_hint(const Run *r, uint8_t remaining);
 /* returns 1 and charges if a hint is affordable */
 uint8_t run_try_hint(Run *r);
 /* skip current sector (zen only). returns 1 if allowed */
 uint8_t run_skip(Run *r);
+/* Restart the sector as a fresh attempt: ZEN only, where nothing was spent, so the move
+ * count starts over and a BEST is still on. Returns 1 if allowed. (The caller must drop
+ * the rewind history, or a rewind would carry an old position into the new count.) In RUN
+ * a restart is only a long rewind: the moves and the energy are gone. */
+uint8_t run_retry(Run *r);
 /* in run mode: check if a stalled run is over (energy 0 with no win) */
 uint8_t run_is_over(const Run *r);
 

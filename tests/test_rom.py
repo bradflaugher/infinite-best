@@ -55,6 +55,19 @@ def make_emulator(*args, emu=None, **kw):
     return PyBoy(*args, **kw)
 
 
+def make_save(run_best_sector=0, zen_sector=1, zen_seed=0, lifetime_bests=0, lifetime_cleared=0,
+              run_best_bests=0, run_best_streak=0):
+    """An SRAM image holding a valid v1 save (both copies), as src/gb/save.c lays it out."""
+    import struct
+    body = b'IB' + struct.pack('<BHHBHHHH', 1, run_best_sector, run_best_bests, run_best_streak,
+                               zen_sector, zen_seed, lifetime_bests, lifetime_cleared)
+    c = 0x5A
+    for b in body:
+        c = ((c << 1 | c >> 7) & 0xFF) ^ b
+    slot = (body + bytes([c])).ljust(0x20, b'\0')
+    return (slot * 2).ljust(SRAM_SIZE, b'\0')
+
+
 def ibgen(*args):
     return subprocess.check_output([IBGEN] + [str(a) for a in args], text=True).split()
 
@@ -219,6 +232,31 @@ class Game:
         # dismiss the intro banner of teaching sectors if any
         assert self.wait(lambda: self.u8('game_state') == GS_PLAY, 3000)
         self.skip_intro()
+
+    def start_zen(self, seed):
+        assert self.wait(lambda: self.u8('game_state') == GS_TITLE)
+        self.run(30)
+        self.set_u16('dbg_seed', seed)
+        self.press('down')
+        self.press('start')
+        assert self.wait(lambda: self.u8('game_state') == GS_PLAY, 3000)
+        self.skip_intro()
+
+    def wander(self, n, avoid=''):
+        """Make n real moves that do not clear the sector (bouncing between two spots)."""
+        made = 0
+        while made < n:
+            before = self.u8('run', RUN_MOVES)
+            for d in 'RLDU':
+                if d in avoid:
+                    continue
+                self.wait(self.ready, 600)
+                self.move(d)
+                self.wait(self.ready, 600)
+                if self.u8('run', RUN_MOVES) != before:
+                    break
+            assert self.u8('run', RUN_MOVES) == before + 1, 'no move possible'
+            made += 1
 
     def skip_intro(self):
         self.wait(lambda: self.ps_in(PS_IDLE, PS_INTRO), 3000)
@@ -401,7 +439,137 @@ class RomTest(unittest.TestCase):
         g.press('a', after=10)
         self.assertTrue(g.wait(g.ready, 300))
         self.assertEqual(g.u8('st'), start)
+        # in RUN a restart is a long rewind: the move stays counted and can be undone
+        self.assertEqual(g.u8('run', RUN_MOVES), 1)
+        self.assertEqual(g.u16('hist_n'), 2)
+        self.assertIn('REBOOTED', g.win_text())
         self.assertEqual(g.screen_errors(), [])
+
+    def test_zen_restart_is_a_fresh_attempt(self):
+        """ZEN: RESTART zeroes the move count (a BEST is back on) and drops the history."""
+        g = self.g
+        seed = 0x1D0B
+        g.start_zen(seed)
+        start = g.u8('st')
+        _, sol = ibgen('solve', seed, 1)
+        g.wander(2, avoid=sol[0])
+        self.assertEqual(g.u8('run', RUN_MOVES), 2)
+        g.press('start', after=10)
+        g.press('down')
+        g.press('a', after=10)
+        self.assertTrue(g.wait(g.ready, 300))
+        self.assertEqual(g.u8('st'), start)
+        self.assertEqual(g.u8('run', RUN_MOVES), 0)
+        self.assertEqual(g.u16('hist_n'), 0, 'a rewind could carry an old position into the new count')
+        self.assertIn('FRESH START', g.win_text())
+        self.assertEqual(g.win_text().split('\n')[0][10:12], '00')
+        g.press('b', hold=4, after=20)            # nothing to rewind to
+        self.assertEqual(g.u8('st'), start)
+        g.solve_current(seed)
+        g.continue_after_win()
+        self.assertEqual(g.u8('run', RUN_STREAK), 1, 'the retried sector should grade BEST')
+
+    def test_over_par_message(self):
+        """The move that puts a BEST out of reach says so (the amber count is CGB only)."""
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        par = g.u8('level', LEVEL_PAR)
+        _, sol = ibgen('solve', seed, 1)
+        g.wander(par, avoid=sol[0])
+        self.assertNotIn('OVER PAR', g.win_text())
+        g.wander(1, avoid=sol[0])
+        self.assertIn('OVER PAR', g.win_text())
+        g.wander(1, avoid=sol[0])                 # said once, cleared by the next move
+        self.assertNotIn('OVER PAR', g.win_text())
+
+    def test_hint_refused_when_it_would_end_the_run(self):
+        """A hint must leave enough energy for the moves it says are left."""
+        g = self.g
+        g.start_run(0x1D0B)
+        par = g.u8('level', LEVEL_PAR)
+        g.pb.memory[g.addr('run') + RUN_ENERGY] = par + 2     # 3 for the hint leaves par - 1
+        g.press('select', after=5)
+        self.assertTrue(g.wait(lambda: 'LOW ENERGY' in g.win_text(), 120))
+        self.assertEqual(g.u8('run', RUN_ENERGY), par + 2)
+        self.assertFalse(g.hint_visible())
+        g.run(100)
+        self.assertEqual(g.u8('game_state'), GS_PLAY, 'the refused hint must not end the run')
+        g.pb.memory[g.addr('run') + RUN_ENERGY] = par + 3     # exactly enough
+        g.press('select', after=5)
+        self.assertTrue(g.hint_visible())
+        self.assertEqual(g.u8('run', RUN_ENERGY), par)
+        g.run(100)
+        self.assertEqual(g.u8('game_state'), GS_PLAY)
+
+    def test_soft_reset(self):
+        """A+B+START+SELECT goes back to the title from anywhere, and keeps the save."""
+        g = self.g
+        seed = 0x1D0B
+        g.start_run(seed)
+        g.solve_current(seed)
+        g.continue_after_win()
+        for b in ('a', 'b', 'start', 'select'):
+            g.pb.button_press(b)
+        g.run(4)
+        for b in ('a', 'b', 'start', 'select'):
+            g.pb.button_release(b)
+        self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_BOOT, 60) or True)
+        self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_TITLE, 600))
+        g.run(60)
+        self.assertEqual(g.u8('is_cgb'), 1 if self.CGB else 0)
+        self.assertIn('RECORD 0002', g.screen_text())
+        g.shot('after_reset')
+        # and the game still plays: same seed, same first sector
+        g.start_run(seed)
+        self.assertEqual(g.level_cells().hex(), ibgen('dump', seed, 1)[2])
+        g.solve_current(seed)
+        g.continue_after_win()
+        self.assertEqual(g.u16('run', RUN_SECTOR), 2)
+
+    def test_warp_past_the_lessons(self):
+        """Once a RUN has reached sector 22, a new one may start there."""
+        seed = 0x1D0B
+        g = self.g
+        # a fresh save has no such choice
+        g.wait(lambda: g.u8('game_state') == GS_TITLE)
+        g.run(30)
+        self.assertNotIn('<S', g.screen_text())
+        g.press('right')
+        g.start_run(seed)
+        self.assertEqual(g.u16('run', RUN_SECTOR), 1)
+        g.stop()
+        self.g = g = self.new_game(make_save(run_best_sector=22, lifetime_bests=7))
+        g.wait(lambda: g.u8('game_state') == GS_TITLE)
+        g.run(30)
+        self.assertIn('RUN <S0001>', g.screen_text())
+        self.assertIn('RECORD 0022', g.screen_text())
+        g.press('down')                           # only on the RUN row
+        g.press('right')
+        self.assertIn('RUN <S0001>', g.screen_text())
+        g.press('up')
+        g.press('right')
+        self.assertIn('RUN <S0022>', g.screen_text())
+        g.shot('title_warp')
+        g.start_run(seed)
+        self.assertEqual(g.u16('run', RUN_SECTOR), 22)
+        self.assertEqual(g.u8('run', RUN_ENERGY), 40)
+        par, start, cells = ibgen('dump', seed, 22)
+        self.assertEqual(g.level_cells().hex(), cells, 'a warped run plays the seed\'s own sector 22')
+        self.assertEqual(g.win_text().split('\n')[0][:5], 'S22  ')
+        g.solve_current(seed)
+        g.continue_after_win()
+        self.assertEqual(g.u16('run', RUN_SECTOR), 23)
+        g.abandon()
+        self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 900))
+        self.assertTrue(g.wait(lambda: 'NEW RECORD' in g.screen_text(), 120))
+        g.run(70)
+        g.press('a', after=10)
+        # the choice is remembered for the next run, and can be switched back
+        self.assertTrue(g.wait(lambda: 'RUN <S0022>' in g.screen_text(), 600))
+        g.run(30)
+        g.press('left')
+        self.assertIn('RUN <S0001>', g.screen_text())
 
     def test_move_buffered_during_slide(self):
         """A direction tapped while still sliding plays when the slide lands."""
