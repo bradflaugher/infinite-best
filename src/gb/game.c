@@ -475,8 +475,8 @@ static void win(void)
     part_burst((uint8_t)(px + 8), (uint8_t)(py + 8), 16,
                grade == GRADE_BEST ? SPR_STAR : SPR_SPARK_BIG, SPAL_STAR, 4);
 
-    save.lifetime_cleared++;
-    if (grade == GRADE_BEST) save.lifetime_bests++;
+    if (save.lifetime_cleared != 0xFFFF) save.lifetime_cleared++;       /* never wrap to 0 */
+    if (grade == GRADE_BEST && save.lifetime_bests != 0xFFFF) save.lifetime_bests++;
     if (run.mode == MODE_ZEN) save.zen_sector = run.sector;
     if (run.mode == MODE_RUN) {
         /* every RUN record is saved as it happens, so a power-off mid-run keeps it */

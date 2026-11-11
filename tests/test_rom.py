@@ -896,6 +896,18 @@ class RomTest(unittest.TestCase):
         self.assertTrue(g.wait(lambda: 'RECORD' in g.screen_text(), 120))
         self.assertIn('SECTOR    9999', g.screen_text())
 
+    def test_lifetime_counters_saturate(self):
+        """The title's lifetime BEST count stops at 65535 instead of wrapping to 0."""
+        self.g.stop()
+        self.g = g = self.new_game(make_save(lifetime_bests=0xFFFF, lifetime_cleared=0xFFFF))
+        seed = 0x1D0B
+        g.start_run(seed)
+        g.solve_current(seed)
+        g.continue_after_win()
+        sram = g.sram()
+        self.assertEqual(sram[12:16], b'\xff\xff\xff\xff')      # lifetime_bests, lifetime_cleared
+        self.assertEqual(sram[0x20:0x31], sram[:0x11], 'backup copy matches')
+
     def test_no_record_without_clears(self):
         g = self.g
         g.start_run(0x1D0B)
