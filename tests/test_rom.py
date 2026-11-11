@@ -26,6 +26,12 @@ GN = 120
 LEVEL_PAR = GN + 1 + 1 + 3 + 2       # offset of Level.par
 RUN_SECTOR, RUN_ENERGY, RUN_STREAK, RUN_MOVES = 3, 5, 6, 12
 RUN_CLEARED = 10
+# what the screen must show (src/gb/assets.h, gfx.c: cell_metatile)
+TILE_MT_BASE, NUM_MT, LOGO_NTILES = 80, 20, 75
+(MT_FLOOR, MT_WALL, MT_WALL2, MT_EXIT_LOCKED, MT_EXIT_OPEN, MT_EXIT_OPEN2, MT_CHIP, MT_STOP,
+ MT_ARROW_U, MT_ARROW_R, MT_ARROW_D, MT_ARROW_L, MT_SWITCH_0, MT_SWITCH_1, MT_GATE_A_CLOSED,
+ MT_GATE_A_OPEN, MT_GATE_B_CLOSED, MT_GATE_B_OPEN, MT_PORTAL, MT_PIT) = range(20)
+LEVEL_NCHIPS = GN + 1
 DIRS = {'U': 'up', 'R': 'right', 'D': 'down', 'L': 'left'}
 SRAM_SIZE = 8192
 SAVE_SLOTS = (0xA000, 0xA020)   # primary + backup copy of SaveData
@@ -33,17 +39,33 @@ SAVE_BEST_SECTOR = 3            # offset of SaveData.run_best_sector
 SAVE_BEST_BESTS, SAVE_BEST_STREAK = 5, 7
 
 
+# IB_EMU=mgba runs the same tests on headless mGBA (`make mgba` builds the harness; needs
+# libmgba-dev). mGBA is cycle-accurate and, like real hardware, drops VRAM/OAM writes made
+# while the LCD is reading them, which PyBoy lets through.
+MGBA = os.path.join(ROOT, 'build', 'mgba_server')
+EMU = os.environ.get('IB_EMU', 'pyboy')
+
+
+def make_emulator(*args, emu=None, **kw):
+    if (emu or EMU) == 'mgba':
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, 'tools', 'mgba'))
+        from mgba_pyboy import MgbaBoy
+        return MgbaBoy(*args, **kw)
+    return PyBoy(*args, **kw)
+
+
 def ibgen(*args):
     return subprocess.check_output([IBGEN] + [str(a) for a in args], text=True).split()
 
 
 class Game:
-    def __init__(self, cgb, sram=None):
+    def __init__(self, cgb, sram=None, emu=None):
         # always pass a RAM file so a stray build/*.gb.ram never leaks into a test
         ram = io.BytesIO(sram if sram is not None else bytes(SRAM_SIZE))
-        self.pb = PyBoy(ROM, window='null', cgb=cgb, symbols=SYM, sound_emulated=False, ram_file=ram)
+        self.pb = make_emulator(ROM, emu=emu, window='null', cgb=cgb, symbols=SYM, sound_emulated=False, ram_file=ram)
         self.pb.set_emulation_speed(0)
-        self.tag = 'cgb' if cgb else 'dmg'
+        self.tag = ('mgba_' if (emu or EMU) == 'mgba' else '') + ('cgb' if cgb else 'dmg')
 
     def addr(self, name):
         return self.pb.symbol_lookup('_' + name)[1]
@@ -100,6 +122,92 @@ class Game:
         """Same for the window map (HUD, banners, pause box)."""
         return self.screen_text(0x9C00)
 
+    # ---- is the picture in VRAM the one the game means to show? ----
+    # A write that reaches VRAM while the LCD is drawing (mode 3) is dropped by the
+    # hardware, and by both emulators here: the game state is right and the screen is
+    # not. So the tests look at VRAM itself, never only at the game's variables.
+
+    def cell_metatiles(self, pos):
+        """Metatiles that may be on screen for a cell (the open exit animates)."""
+        t = self.level_cells()[pos]
+        chips, sw = self.u8('st', 1), self.u8('st', 2)
+        full = (1 << self.u8('level', LEVEL_NCHIPS)) - 1
+        if t == 1:
+            return (MT_WALL2 if (((pos * 5) ^ (pos >> 2)) & 3) == 0 else MT_WALL,)
+        if t == 2:
+            return (MT_EXIT_LOCKED,) if chips != full else (MT_EXIT_OPEN, MT_EXIT_OPEN2)
+        if 3 <= t <= 5:
+            return (MT_FLOOR if chips & (1 << (t - 3)) else MT_CHIP,)
+        if t == 11:
+            return (MT_SWITCH_1 if sw else MT_SWITCH_0,)
+        if t == 12:
+            return (MT_GATE_A_OPEN if sw else MT_GATE_A_CLOSED,)
+        if t == 13:
+            return (MT_GATE_B_CLOSED if sw else MT_GATE_B_OPEN,)
+        return ({6: MT_STOP, 7: MT_ARROW_U, 8: MT_ARROW_R, 9: MT_ARROW_D, 10: MT_ARROW_L,
+                 14: MT_PORTAL, 15: MT_PIT}.get(t, MT_FLOOR),)
+
+    def rom_bytes(self, name, n):
+        bank, addr = self.pb.symbol_lookup('_' + name)
+        off = addr if addr < 0x4000 else bank * 0x4000 + addr - 0x4000
+        with open(ROM, 'rb') as f:
+            f.seek(off)
+            return f.read(n)
+
+    def vram(self, addr, n, bank=0):
+        return bytes(self.pb.memory[bank, addr + i] for i in range(n))
+
+    def board_errors(self):
+        """Play-field cells whose tiles (and CGB palettes) in VRAM differ from the level."""
+        m = self.pb.memory
+        cgb = self.u8('is_cgb')
+        bad = []
+        for y in range(8):
+            for x in range(10):
+                pos = (y + 1) * 12 + x + 1
+                a = 0x9800 + y * 2 * 32 + x * 2
+                got = [m[0, a], m[0, a + 1], m[0, a + 32], m[0, a + 33]]
+                want = [[TILE_MT_BASE + mt * 4 + c for c in range(4)] for mt in self.cell_metatiles(pos)]
+                if got not in want:
+                    bad.append(f'cell ({x},{y}) tiles {got} want {want}')
+                    continue
+                if cgb:
+                    mt = (got[0] - TILE_MT_BASE) // 4
+                    pal = self.u8('mt_pal', mt)
+                    attr = [m[1, a], m[1, a + 1], m[1, a + 32], m[1, a + 33]]
+                    if attr != [pal] * 4:
+                        bad.append(f'cell ({x},{y}) attributes {attr} want {pal}')
+        return bad
+
+    def hud_errors(self):
+        """The HUD's numbers in the window map against the run's state."""
+        row = self.win_text(1)
+        want = {'par': (6, self.u8('level', LEVEL_PAR)), 'moves': (10, self.u8('run', RUN_MOVES)),
+                'streak': (18, self.u8('run', RUN_STREAK))}
+        if self.u8('run') == 0:
+            want['energy'] = (14, self.u8('run', RUN_ENERGY))
+        return [f'HUD {k} shows {row[x:x + 2]!r} want {min(v, 99):02d}'
+                for k, (x, v) in want.items() if row[x:x + 2] != '%02d' % min(v, 99)]
+
+    def tile_data_errors(self, name, ntiles):
+        """Tile patterns loaded at TILE_MT_BASE against the ROM's copy (mt_tiles / logo_tiles)."""
+        want = self.rom_bytes(name, ntiles * 16)
+        got = self.vram(0x8000 + TILE_MT_BASE * 16, ntiles * 16)
+        return [f'{name} tile {TILE_MT_BASE + i // 16} byte {i % 16}: {got[i]:02x} want {want[i]:02x}'
+                for i in range(len(want)) if got[i] != want[i]][:8]
+
+    def screen_errors(self):
+        """Everything checkable while a sector is idle. A cell must stay wrong across two
+        looks to count, so a redraw that is merely still in progress is not an error."""
+        def look():
+            return self.board_errors() + self.hud_errors()
+        first = look()
+        if not first:
+            return []
+        self.run(3)
+        second = look()
+        return [e for e in second if e in first]
+
     def win_tile(self, x, y):
         return self.pb.memory[0x9C00 + y * 32 + x]
 
@@ -130,11 +238,14 @@ class Game:
         self.press(DIRS[d], hold=2, after=1)
         self.wait(lambda: not self.ps_in(PS_SLIDE), 400)
 
-    def solve_current(self, seed):
+    def solve_current(self, seed, check=None):
+        """Play the host's optimal solution; check() runs at every stop along the way."""
         sector = self.u16('run', RUN_SECTOR)
         par, moves = ibgen('solve', seed, sector)
         for d in moves:
             self.wait(self.ready, 600)
+            if check:
+                check()
             self.move(d)
         return sector, int(par)
 
@@ -172,6 +283,7 @@ class Game:
 
 class RomTest(unittest.TestCase):
     CGB = False
+    EMU = None        # None: PyBoy, or IB_EMU; tests/test_hw.py reruns the suite on mGBA
     SECTORS = 20      # reaches every mechanic (portals unlock at 18)
 
     @classmethod
@@ -181,10 +293,16 @@ class RomTest(unittest.TestCase):
                 raise unittest.SkipTest(f'missing {f}; run make rom build/ibgen')
 
     def setUp(self):
-        self.g = Game(self.CGB)
+        self.g = self.new_game()
+
+    def new_game(self, sram=None):
+        return Game(self.CGB, sram, emu=self.EMU)
 
     def tearDown(self):
+        # the VBlank handler's VRAM / palette writes never ran out of VBlank (gfx.c)
+        late = self.g.u8('dbg_vbl_late')
         self.g.stop()
+        self.assertEqual(late, 0, 'VBlank handler wrote VRAM after VBlank had ended')
 
     def test_boot_title(self):
         g = self.g
@@ -193,6 +311,10 @@ class RomTest(unittest.TestCase):
         text = g.screen_text()
         for word in ('RUN', 'ZEN', 'CODEX', 'RECORD'):
             self.assertIn(word, text)
+        # the logo's tiles and its map all arrived (they are written with the LCD on)
+        self.assertEqual(g.tile_data_errors('logo_tiles', LOGO_NTILES), [])
+        self.assertEqual(g.vram(0x9800 + 32, 20), g.rom_bytes('logo_map', 20))
+        self.assertEqual(g.vram(0x9800 + 7 * 32, 20), g.rom_bytes('logo_map', 140)[120:])
         self.assertEqual(g.u8('is_cgb'), 1 if self.CGB else 0)
         g.shot('title')
 
@@ -208,7 +330,20 @@ class RomTest(unittest.TestCase):
             self.assertEqual(g.u8('level', LEVEL_PAR), int(par))
             self.assertEqual(g.u8('st'), int(start))
             self.assertLess(g.u16('dbg_gen_frames'), 300)
-            _, p = g.solve_current(seed)
+            if sector in (1, 12):
+                self.assertEqual(g.tile_data_errors('mt_tiles', NUM_MT * 4), [])
+            # the picture in VRAM matches the level at every stop of the solution
+            _, p = g.solve_current(seed, lambda: self.assertEqual(g.screen_errors(), [], f'sector {sector}'))
+            # the clear banner, drawn while particles fly and then under the compile bar
+            self.assertTrue(g.wait(lambda: g.u8('game_state') == GS_GEN, 600))
+            self.assertTrue(g.wait(lambda: 'READY' in g.win_text(), 2000))
+            banner = g.win_text().split('\n')
+            self.assertEqual(banner[1][2:19], 'SECTOR %04d CLEAR' % sector)
+            self.assertIn('** BEST! **', banner[2])
+            self.assertEqual(banner[3][2:18], 'MOVES %02d  PAR %02d' % (p, p))
+            self.assertEqual(banner[5][2:19], 'SECTOR %04d READY' % (sector + 1))
+            self.assertEqual([g.win_tile(0, y) for y in range(1, 7)] + [g.win_tile(19, y) for y in range(1, 7)],
+                             [g.win_tile(0, 1)] * 12, 'banner box edge broken')
             if sector == 3:
                 g.shot('win')
             if sector in (5, 14, 18):
@@ -241,6 +376,7 @@ class RomTest(unittest.TestCase):
         g.shot('rewind')
         g.run(10)
         self.assertEqual(g.u8('st'), start)
+        self.assertEqual(g.screen_errors(), [])
         # rewinding is free but spent energy stays spent
         self.assertEqual(g.u8('run', RUN_ENERGY), energy - 1)
         self.assertEqual(g.u8('run', RUN_MOVES), 1)
@@ -265,6 +401,7 @@ class RomTest(unittest.TestCase):
         g.press('a', after=10)
         self.assertTrue(g.wait(g.ready, 300))
         self.assertEqual(g.u8('st'), start)
+        self.assertEqual(g.screen_errors(), [])
 
     def test_move_buffered_during_slide(self):
         """A direction tapped while still sliding plays when the slide lands."""
@@ -428,10 +565,10 @@ class RomTest(unittest.TestCase):
         self.assertTrue(g.wait(lambda: 'NEW RECORD' in g.screen_text(), 120))
         self.assertIn('RECORD    0003', g.screen_text())
         sram = g.sram()
-        g.stop()
 
         def title_record(ram):
-            self.g = Game(self.CGB, ram)
+            self.g.stop()
+            self.g = self.new_game(ram)
             self.assertTrue(self.g.wait(lambda: self.g.u8('game_state') == GS_TITLE, 600))
             self.g.run(30)
             return self.g.screen_text().splitlines()[17]
@@ -444,7 +581,7 @@ class RomTest(unittest.TestCase):
         self.assertEqual(self.g.sram()[:0x20], sram[:0x20], 'primary copy repaired')
         self.g.stop()
         # a new run from the same save that does not beat 3 is not a record
-        self.g = g = Game(self.CGB, sram)
+        self.g = g = self.new_game(sram)
         g.start_run(seed)
         g.abandon()
         self.assertTrue(g.wait(lambda: 'SIGNAL LOST' in g.screen_text(), 900))

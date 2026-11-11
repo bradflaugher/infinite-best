@@ -298,6 +298,8 @@ static void start_level(void)
     else hud_msg("");
     msg_temp = 0;       /* tutorial lines stay up until something replaces them */
     buf_dir = 0xFF;
+    /* set before game_state, so the pair never reads "playing, idle" under the banner */
+    if (level.featured != 0xFF) ps = PS_INTRO;
     game_state = GS_PLAY;
     if (level.featured != 0xFF) mech_intro();
     ps = PS_IDLE;
